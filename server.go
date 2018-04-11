@@ -1,0 +1,1091 @@
+package main
+
+import (
+	"TFRP/azurerm"
+	"TFRP/datadog"
+	"TFRP/kubernetes"
+	"TFRP/rpforrp"
+	"context"
+	"crypto/tls"
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"math/rand"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/Azure/azure-sdk-for-go/arm/keyvault"
+	"github.com/Azure/azure-sdk-for-go/arm/resources/resources"
+	"github.com/Azure/go-autorest/autorest"
+	"github.com/Azure/go-autorest/autorest/adal"
+	"github.com/Azure/go-autorest/autorest/azure"
+	"github.com/gorilla/mux"
+	"github.com/hashicorp/terraform/config"
+	"github.com/hashicorp/terraform/helper/hilmapstructure"
+	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/hashicorp/terraform/terraform"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
+)
+
+type schemaMap map[string]*schema.Schema
+
+type DatadogMonitorTemplateDefinition struct {
+	Location   string
+	Properties DatadogMonitorTemplateDefinitionProperties
+}
+
+type DatadogMonitorTemplateDefinitionProperties struct {
+	ApiKey      string
+	Appkey      string
+	MonitorName string
+}
+
+type DatadogTimeboardTemplateDefinition struct {
+	Location   string
+	Properties DatadogTimeboardTemplateDefinitionProperties
+}
+
+type DatadogTimeboardTemplateDefinitionProperties struct {
+	ApiKey               string
+	Appkey               string
+	TimeboardName        string
+	TimeboardTitle       string
+	TimeboardDescription string
+	GraphTitle           string
+	GraphViz             string
+	GraphQuery           string
+}
+
+type KubernetesTemplateDefinition struct {
+	Location          string
+	KubeConfigFileUri string
+	Config            string
+}
+
+type KubernetesPodDefinition struct {
+	Location   string
+	Properties KubernetesPodDefinitionProperties
+}
+
+type KubernetesPodDefinitionProperties struct {
+	KubeConfigFileUri     string
+	PodName               string
+	ContainerImage        string
+	ContainerName         string
+	ContainerPort         int
+	KeyVaultURI           string
+	KeyVaultSecretName    string
+	KeyVaultSecretVersion string
+}
+
+type KubernetesServiceDefinition struct {
+	Location   string
+	Properties KubernetesServiceDefinitionProperties
+}
+
+type KubernetesServiceDefinitionProperties struct {
+	KubeConfigFileUri string
+	ServiceName       string
+	TargetPodName     string
+	Port              int
+	TargetPort        int
+}
+
+type DockerImageDefinition struct {
+	Location   string
+	Properties DockerImageDefinitionProperties
+}
+
+type DockerImageDefinitionProperties struct {
+	SwaggerFileUri    string
+	ImageName         string
+	DockerhubAccount  string
+	DockerhubPassword string
+}
+
+type Response struct {
+	SubId        string
+	RG           string
+	Provider     string
+	Resource     string
+	ResourceName string
+}
+
+type Template struct {
+	Schema         string             `json:"$schema,omitempty"`
+	ContentVersion string             `json:"contentVersion,omitempty"`
+	Resources      []TemplateResource `json:"resources,omitempty"`
+}
+
+type TemplateResource struct {
+	Name       string                 `json:"name,omitempty"`
+	Type       string                 `json:"type,omitempty"`
+	Location   string                 `json:"location,omitempty"`
+	ApiVersion string                 `json:"apiversion,omitempty"`
+	Sku        map[string]interface{} `json:"sku,omitempty"`
+	Tags       map[string]interface{} `json:"tags,omitempty"`
+	Properties map[string]interface{} `json:"properties,omitempty"`
+}
+
+type Error struct {
+	Error ErrorDetails `json:"error,omitempty"`
+}
+
+type ErrorDetails struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+var testAccProviders map[string]terraform.ResourceProvider
+var testAccProvider *schema.Provider
+var datadogTestAccProvider *schema.Provider
+var kubernetesTestAccProvider *schema.Provider
+
+func init() {
+	testAccProvider = azurerm.Provider().(*schema.Provider)
+	datadogTestAccProvider = datadog.Provider().(*schema.Provider)
+	kubernetesTestAccProvider = kubernetes.Provider().(*schema.Provider)
+	testAccProviders = map[string]terraform.ResourceProvider{
+		"azurerm":    testAccProvider,
+		"datadog":    datadogTestAccProvider,
+		"kubernetes": kubernetesTestAccProvider,
+	}
+}
+
+func GetPersonEndpoint(w http.ResponseWriter, req *http.Request) {
+	params := mux.Vars(req)
+	json.NewEncoder(w).Encode(Response{SubId: params["subscriptionId"], RG: params["resourceGroup"], Provider: params["provider"], Resource: params["resource"], ResourceName: params["name"]})
+}
+
+func PutResources(w http.ResponseWriter, req *http.Request) {
+	body, _ := ioutil.ReadAll(req.Body)
+
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+
+	// add any fixed providers
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+
+	providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+
+	// A single state variable to track the lifecycle, starting with no state
+	var state *terraform.State
+
+	config := string(body)
+	step := resource.TestStep{
+		Config: config,
+	}
+
+	fmt.Fprintf(w, config)
+	resource.ApplyConfig(opts, state, step)
+}
+
+func PutMonitorDepolyment(w http.ResponseWriter, req *http.Request) {
+	monitorTemplateDefinition := DatadogMonitorTemplateDefinition{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&monitorTemplateDefinition)
+
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+	// add any fixed providers
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+
+	providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+	// A single state variable to track the lifecycle, starting with no state
+	var state *terraform.State
+	config := GetDatadogMonitorTempalte(monitorTemplateDefinition)
+	step := resource.TestStep{
+		Config: config,
+	}
+
+	responseBody, _ := json.Marshal(monitorTemplateDefinition)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+	fmt.Println(config)
+	resource.ApplyConfig(opts, state, step)
+}
+
+func PutDeployment(w http.ResponseWriter, req *http.Request) {
+	params := mux.Vars(req)
+	body, _ := ioutil.ReadAll(req.Body)
+
+	configMessage := string(body)
+	result, err := config.Load(configMessage)
+	if err != nil {
+		fmt.Fprintf(w, err.Error())
+	}
+
+	err = result.Validate()
+	if err != nil {
+		fmt.Fprintf(w, err.Error())
+	}
+
+	templateResources := make([]TemplateResource, len(result.Resources))
+	for k, v := range result.Resources {
+		resourceConfig := *terraform.NewResourceConfig(v.RawConfig)
+
+		resourcesProperties := make(map[string]interface{})
+		sku := make(map[string]interface{})
+
+		raw, _ := resourceConfig.Get("")
+		m, _ := raw.(map[string]interface{})
+
+		for subk, value := range m {
+			if !strings.EqualFold(subk, "name") && !strings.EqualFold(subk, "resource_group_name") && !strings.EqualFold(subk, "location") && !strings.EqualFold(subk, "tags") {
+				if strings.EqualFold(subk, "account_type") {
+					sku["name"] = value
+				} else {
+					resourcesProperties[strings.Replace(subk, "_", "", -1)] = value
+				}
+			}
+		}
+
+		resourceName, _ := resourceConfig.Get("name")
+		resourceLocation, _ := resourceConfig.Get("location")
+
+		resourcesTagMap := make(map[string]interface{})
+		resourceTagsRaw, ok := resourceConfig.Get("tags")
+
+		if ok {
+			hilmapstructure.WeakDecode(resourceTagsRaw, &resourcesTagMap)
+		}
+
+		templateResources[k] = TemplateResource{
+			Name:       resourceName.(string),
+			Type:       resourceTypeTransform(v.Type),
+			ApiVersion: resourceApiVersion(v.Type),
+			Sku:        sku,
+			Location:   resourceLocation.(string),
+			Tags:       resourcesTagMap,
+			Properties: resourcesProperties}
+	}
+
+	template := Template{
+		Schema:         "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+		ContentVersion: "1.0.0.0",
+		Resources:      templateResources,
+	}
+
+	c := map[string]string{
+		"AZURE_CLIENT_ID":       "b113ac54-4b98-4c10-ae0c-509cb08cbee7",
+		"AZURE_CLIENT_SECRET":   "e3df36d9-2d0f-4e05-a1ad-b5888961a306",
+		"AZURE_SUBSCRIPTION_ID": "e01d2242-4534-453d-a79f-a5407954ddd7",
+		"AZURE_TENANT_ID":       "72f988bf-86f1-41af-91ab-2d7cd011db47"}
+
+	oauthConfig, _ := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, c["AZURE_TENANT_ID"])
+	spt, _ := adal.NewServicePrincipalToken(*oauthConfig, c["AZURE_CLIENT_ID"], c["AZURE_CLIENT_SECRET"], azure.PublicCloud.ResourceManagerEndpoint)
+
+	deploymentsClient := resources.NewDeploymentsClient("e01d2242-4534-453d-a79f-a5407954ddd7")
+	deploymentsClient.Authorizer = autorest.NewBearerAuthorizer(spt)
+	jsonTemplate, _ := json.Marshal(template)
+	templateMap := map[string]interface{}{}
+	json.Unmarshal(jsonTemplate, &templateMap)
+	deploymentProperties := resources.DeploymentProperties{
+		Template: &templateMap,
+		Mode:     resources.Complete,
+	}
+
+	deployment := resources.Deployment{
+		Properties: &deploymentProperties,
+	}
+
+	deploymentsClient.CreateOrUpdate(params["resourceGroup"], params["deploymentName"], deployment, nil)
+	fmt.Fprintf(w, "Deployment sent:")
+	fmt.Fprintf(w, string(jsonTemplate))
+
+	/*deploymentResponseChannel, errChannel := deploymentsClient.CreateOrUpdate(resourceGroupName, params["deploymentName"], deployment, nil)
+
+	deploymentResponse := <-deploymentResponseChannel
+	err = <-errChannel
+
+	if err != nil {
+		fmt.Fprintf(w, err.Error())
+	}
+
+	response := deploymentResponse.Response
+	fmt.Fprintf(w, response.Status)*/
+}
+
+func randStringRunes(n int) string {
+	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
+}
+
+func resourceTypeTransform(hclType string) string {
+	switch hclType {
+	case "azurerm_storage_account":
+		return "Microsoft.Storage/storageAccounts"
+	default:
+		return fmt.Sprintf("Microsoft.ExternalShim/%s", hclType)
+	}
+}
+
+func resourceApiVersion(hclType string) string {
+	switch hclType {
+	case "azurerm_storage_account":
+		return "2017-06-01"
+	default:
+		return fmt.Sprintf("2017-08-01", hclType)
+	}
+}
+
+func PutTimeboardDepolyment(w http.ResponseWriter, req *http.Request) {
+	timeboardTemplateDefinition := DatadogTimeboardTemplateDefinition{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&timeboardTemplateDefinition)
+
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+	// add any fixed providers
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+
+	providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+	// A single state variable to track the lifecycle, starting with no state
+	var state *terraform.State
+	config := GetDatadogTimeboardTempalte(timeboardTemplateDefinition)
+	step := resource.TestStep{
+		Config: config,
+	}
+
+	responseBody, _ := json.Marshal(timeboardTemplateDefinition)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+	fmt.Println(config)
+	resource.ApplyConfig(opts, state, step)
+}
+
+func PutKubernetesDepolyment(w http.ResponseWriter, req *http.Request) {
+	kubernetesTemplateDefinition := KubernetesTemplateDefinition{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&kubernetesTemplateDefinition)
+
+	out, err := exec.Command("uuidgen").Output()
+	if err != nil {
+		log.Fatal(err)
+	}
+	configFileName := fmt.Sprintf("/tmp/%s", base32.StdEncoding.EncodeToString(out))
+	fmt.Printf("%s", configFileName)
+
+	resp, err := http.Get(kubernetesTemplateDefinition.KubeConfigFileUri)
+	if err != nil {
+		log.Fatal("Cannot download config file", err)
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+
+	file, err := os.Create(configFileName)
+	if err != nil {
+		log.Fatal("Cannot create file", err)
+	}
+	defer file.Close()
+
+	fmt.Fprintf(file, string(body))
+
+	// prepare to apply config file
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+	// add any fixed providers
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+	providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+	// A single state variable to track the lifecycle, starting with no state
+	var state *terraform.State
+	config := GetKubernetesTempalte(configFileName, kubernetesTemplateDefinition.Config)
+	step := resource.TestStep{
+		Config: config,
+	}
+
+	responseBody, _ := json.Marshal(kubernetesTemplateDefinition)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+
+	go resource.ApplyConfig(opts, state, step)
+}
+
+func PutKubernetesPod(w http.ResponseWriter, req *http.Request) {
+	kubernetesPodDefinition := KubernetesPodDefinition{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&kubernetesPodDefinition)
+
+	// out, err := exec.Command("uuidgen").Output()
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// configFileName := fmt.Sprintf("/tmp/%s", base32.StdEncoding.EncodeToString(out))
+	// fmt.Printf("%s", configFileName)
+
+	// resp, err := http.Get(kubernetesPodDefinition.Properties.KubeConfigFileUri)
+	// if err != nil {
+	// 	log.Fatal("Cannot download config file", err)
+	// }
+	// defer resp.Body.Close()
+	// body, err := ioutil.ReadAll(resp.Body)
+
+	// file, err := os.Create(configFileName)
+	// if err != nil {
+	// 	log.Fatal("Cannot create file", err)
+	// }
+	// defer file.Close()
+
+	// fmt.Fprintf(file, string(body))
+
+	inlineconfig := getSecretFromKeyVault(kubernetesPodDefinition.Properties.KeyVaultURI, kubernetesPodDefinition.Properties.KeyVaultSecretName, kubernetesPodDefinition.Properties.KeyVaultSecretVersion)
+
+	//inlineconfig := "YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6Ci0gY2x1c3RlcjoKICAgIGNlcnRpZmljYXRlLWF1dGhvcml0eS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VWNGVrTkRRWEVyWjBGM1NVSkJaMGxSVUVaWFoyOUtNa1JZVVhGWlJEbHlLM0F2VEdVNVJFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkVRVTRLVFZGemQwTlJXVVJXVVZGRVJYZEthbGxVUVdWR2R6QjRUMFJCZWsxRVozbE5lbFY1VGtSQ1lVWjNNSGxOUkVGNlRVUmplVTE2VlhsT1JFSmhUVUV3ZUFwRGVrRktRbWRPVmtKQlRWUkJiVTVvVFVsSlEwbHFRVTVDWjJ0eGFHdHBSemwzTUVKQlVVVkdRVUZQUTBGbk9FRk5TVWxEUTJkTFEwRm5SVUYyY0dReUNuWk5kRVJJVm5OVVN6Rm9PVWxhT1dwTmMwVllNak5FYXpCVVZrRkJaREpIT1VwVVMwSmtORUpDWkRkcU56SmxOMUpOWWtGVE1uZ3lhMU5uZVRGdEwySUtiblE0Y2tnelMwMDNiM2hoZUVaWGFVOU5ia05hZFVVMldXUkNOVUk0WkhRM1ZXTnBiMFp6UTFocGNGbHZjMmRuVUVOeWVWcEJUMWRuUTJoRlRtUXljUXBvTkhkUE5tWTRWeTlxWVRsd1RGVXpjM05hUmk5SVdEQlpTRlp6V0U5T1lXZFdhbE41WWxWdmVrTlJiVTR4ZVVOS1MxaEpLM29yV0VKRWNqRTVNV0pXQ204elJrOHJUelY0TUc4Mk1tSmtWMjFPU1c4MGFWVmtNMnN3WmpReGJub3pNMFZsY1Voc2JubFpWVmc0Wnk5V1ZUZDFZa1JOYlROT1ZIQlZOMDVSY0VrS1JtMWthRkZyZGpoSWExSm1WVGMwYW1oWGJIZG9kM2RMVm5WUFNpdENXWFZyUW5oR1p6VjFkSEZzY25OUWEzaGpjRm92U3pCVlNXSjFWV1UzV25wdFNBcHNWREZEZEVGT1FXRlVlVzl0VGsxRVVUYzNSR1JTTUhKRFVsZDVWeTg0Y1V4RGNIQm1Ta0ozYkd4NVpqbENTMHN3YVhGNE1uUkhlSEV2VUZGeGJUSm5DbGRhVEUxUmVXcDZRaTloVVRGd1EzWlNRMHBCYVdONWIxbHBSRmxvYjJWTVltdGxXbGswWlVjeWQyOXBOeTluUmtOTVZFZEhSR1p2YkdacVVtZG1VR1FLU1VoU2FFWXpVU3RwVlRSaGExcEVVWE5qVlRORFJIRlFhRU5vVDFVMmVYUXpSVXhDZVc1WGVYVk1SRkZOY25sT2Rrb3pTME4yZW5ZdldUTjZOM2hYZEFvMVJIcHFaemt5U0RoRlRubzRjSFJEUTFSMFZtWlpTMHB4U0RsS05XNU1NMDRyTjBGWE5FZG5Wa1ZJVlRCVFRESjZhVlZLZEdOaFJVRklUVFJYZVdvckNsSlZZUzgyWmxOMUsxbERTQ3R6YkhGaU5YcDBOVlZUTjJkbk9HRjJlSHBCWjA1VlF6QkZWbTVFZVc1WVJYZDZjbVI2TVZCb2NtMTFNekF5U0ZGcloxb0tjbGxQSzJoQlIxUjVUV2xqVDFaSmJITmtMMWd3TmxGWE5ubFFUMWxGU1hKMVJXNVFhRWx6UTBGM1JVRkJZVTFxVFVORmQwUm5XVVJXVWpCUVFWRklMd3BDUVZGRVFXZExhMDFCT0VkQk1WVmtSWGRGUWk5M1VVWk5RVTFDUVdZNGQwUlJXVXBMYjFwSmFIWmpUa0ZSUlV4Q1VVRkVaMmRKUWtGRWQwbERka2RWQ25kT1EyaHdOVU5sWWxGeFZ6RnpOQzltTVdVM1NsYzRRek16VVVKdE4zcElSWEJtZEVSMlZtcHBSUzh6ZVhkSU5HUm1aSFp6VWtoS01HWTNkRFJCV21ZS2IzRlRUR1ExY1hOWmNsbHpVRko1UVRsak4xSTJjSEpZZHk5NVVrTnBaM2hRYUU5Q0wwSnVUMUUwSzJWaWMwSkhTMU5zYTJoeVNWWmFORFZEUXpKMk5ncHRiV1ZZTDI1WWRsVkNNRmRpWmsxalZqRTFiQzlFWW5OcFEydDZSMUJTV25KSVNtMXZXRGhSTTNjMlRVeGpkVWh0WVN0MFptRnlORTlaSzNGNlkyd3JDa04yZVdaS1dURnFlRTAwUzNWNFVtSlRTVVZ4T1V0cWVEZGhiVUpQWm5WRWFubDBOSFp1UWpGRFJ6WmtjMU1yY2xGM2RETnhjVTlPU1U5SGVERk1iVVFLYVdRellqRm9jMjl5TDNkTWRrdENiR2xoWjFSSk9VWXJUVWwyWkZocGFXdENPWGxUU1RkTWJHNHZaMDQ1TWtvMVVsSkNTVTh6Wms5cmR6TnZSSEJuY3dwUlRXOU5SbG9yVlVOWFFWVmhkRFJpTVVScGFtSmlXVlI0ZHpGRWFHNVBibG80VVhoclpETjNXR1pxVWxkRVNXWmpURkF5T1ZsRFFYUnpOVzh6WVZrd0NuSlRVeXRVZEhGRE5teGpkSEZ6WW1VNVNIRlhSV2xZUlM4NVMxWkxWVkoyV1U5UVZHOUxjMEV4YW5SeGNEWkVTa3hFYkc4MFFsSlJOWE00Y0c1MWJWWUtPRTVsUzFsTE5tNTJRV0ZZWjBKTGFqRlpXRW8xUTNGMGRtcGtZbFJqZFVScFVpdGhaMU4xTVd4cVVYRXlVMFJSWWt4VmJsTnVkWGgxYVROS1ZWUlJTQXBDYUZGUWN6YzBWR016VjFVd2RFdEhSRVJ2VW1sME5XVTRRMmN6VG14WU1XeGFaMUpvVGxkWU5VOHZVMHRtU0hsWE5XRlBOeXRxWm1WTk0wNVNhalV4Q2tab1ZWSlhSSEZPWVRWUUsxUk1SSFkwZWxsWmVIaGlaWGRXY21SR1NuVklSeTl1U1NzNFl6UnhLMG92VFM5UlFtUnNhRTFwWTBoWGNXRnJSVFpWUTNNS1NXRnJlVzFJY1d4emJrZzFOR3gzTlU5QlNYazBjRGxwUjJGbVpYWm5WVGgwWmpGcUNpMHRMUzB0UlU1RUlFTkZVbFJKUmtsRFFWUkZMUzB0TFMwSwogICAgc2VydmVyOiBodHRwczovL215YWtzY2x1c3Qtd3Vka3ViZXJlc291cmNlZy1kMDVmNGUtYjNhMDQwYmIuaGNwLmVhc3R1cy5hem1rOHMuaW86NDQzCiAgbmFtZTogbXlBS1NDbHVzdGVyCmNvbnRleHRzOgotIGNvbnRleHQ6CiAgICBjbHVzdGVyOiBteUFLU0NsdXN0ZXIKICAgIHVzZXI6IGNsdXN0ZXJBZG1pbl93dWRrdWJlUmVzb3VyY2VHcm91cF9teUFLU0NsdXN0ZXIKICBuYW1lOiBteUFLU0NsdXN0ZXIKY3VycmVudC1jb250ZXh0OiBteUFLU0NsdXN0ZXIKa2luZDogQ29uZmlnCnByZWZlcmVuY2VzOiB7fQp1c2VyczoKLSBuYW1lOiBjbHVzdGVyQWRtaW5fd3Vka3ViZVJlc291cmNlR3JvdXBfbXlBS1NDbHVzdGVyCiAgdXNlcjoKICAgIGNsaWVudC1jZXJ0aWZpY2F0ZS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VVNWFrTkRRWFEyWjBGM1NVSkJaMGxSU1RoeVVuQlRSVzh6UTJkT1dtTlRVeXR4VUhaVFZFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkVRVTRLVFZGemQwTlJXVVJXVVZGRVJYZEthbGxVUVdWR2R6QjRUMFJCZWsxRVozbE5lbFY1VGtSR1lVWjNNSGxOUkVGNlRVUmplVTE2VlhsT1JFWmhUVU52ZUFwR2VrRldRbWRPVmtKQmIxUkViazQxWXpOU2JHSlVjSFJaV0U0d1dsaEtlazFST0hkRVVWbEVWbEZSUkVWM1dtcGlSMnhzWW01UmQyZG5TV2xOUVRCSENrTlRjVWRUU1dJelJGRkZRa0ZSVlVGQk5FbERSSGRCZDJkblNVdEJiMGxEUVZGRVlUQndiVEUzVm5JeWVqZzBWWFU1T0ZGNGQyaEZkR05NVFVSTGFIb0taRlk0T1VwMFJFTktVMW8zVEhRNU5qZHdPRTlIV2xFd1VuVkVXRkJVU0VoRmFqTnVXVlZsV0cxTlMyWlhZWEZwVldKTk0wUTJiWE0zWTJKMWMwZDRTd280U1dwUVYwTkdkR0l4VlN0cWJEUjFWMU5QUTNCakt6TnVVMGQ0UlUxRUswYzFTbGxwWjFCbU0xcEJhWEZHZGxWV2NYZEZjMVJSV0ZGeFVIRmhSRTlqQ2tSelYwRk9kVzB3UkhWcmFIRXJkSGhwWWsxa05YTjJZV1JvV2tJd1VTdHhTMlZoVDFwT2JYUlpSMVJzU1RadGIzQkVXVWRPVW1oVWIwMVZNSFZqVlVNS1MyWkVOMXB1UlV0VGRHaDVaVUZrUkVZMlpXRmFRbWQ2ZDBzdlRHVTFiSFJQVkVOaFdXRlZia2RxTVZaemVYTk5Xako2Vm1kT0wzcEViMnhPUlVKcVRBbzBlbXRhYXpKNmJrTTBkMlI0UTNGdU5qRmFTWHAxZW5VMFZERXhSMFIzWVc5c1UwWkJOMkZxU1ZveFRIQXdOMDlpWkZFdlRFSkpUMUpLWjI4MmVURktDalJWZUVsdWR6bDBXbkV3VTB4TU1sWlRaVlZEYUV4SFprcHljVzVSVUZaRlIyNDFkM3BGV2xWdWIwVllPSGR3YURsa01IRnBVM1ZoYTNKR1NVVnpkM2dLYUZGd05rVlJTRlYzVUZCV1VrcFlZM1ZLYVhOMEwzRjZWazFMTms1b2MwRjFRVFpFZG5aNVJ6ZHpURTR2YWxCRlprVnhWekl2U2tsQlFYcHFZbTUwUVFwV1pFTldTbmRrZGtkakwzQk9RVTlrT1RrMFVETkhVRmRrUkdGR1ZsUm9kbnByYVVScldYcEZPUzlCVUN0eFNYWklkVkp5WVZWMWIwMTFLeTh4WXpWSENuTnZORlJqVHpKWmFsTTRORlpXZVU5bk1IcHJlRkZDTlhwWlpWbE9jRGxxTDFWVlEwbDJVVkJMYUhob01EWXhVamhPYmpWSGRGVm9LelpvVmtoMFYxY0tiMDlzTUVSWlozaExNRFJyZVROVVRFbFFOVGxYU0ZvMlpFTlZkbmxXTVhveFlVdDNNWE5HYWprNU1FcFVjbEJvYVRWQlRXRnFUbFJUVDFoQmR6aEJSZ295Tml0RlNFWmxhemQxV25JemQwbEVRVkZCUW05NlZYZE5la0ZQUW1kT1ZraFJPRUpCWmpoRlFrRk5RMEpoUVhkRmQxbEVWbEl3YkVKQmQzZERaMWxKQ2t0M1dVSkNVVlZJUVhkSmQwUkJXVVJXVWpCVVFWRklMMEpCU1hkQlJFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkJUME5CWjBWQmIzRmhNbkp4U2s4S2JuaFJabEl4V1dobVkydEVkRGR0VWtGak4wNUxOazByVTFOU1JFeFJkV2x4TkhaU1NFVjRjMDVIY21WMk5tOUJORTF6UmpWTVNVcEtSalV4WWtZNVR3cHJRM0pPVjA1WVIzVjJTek4yWmt3ek1uTmphalYyZEVkUFZrcEtjMWt3YkdZd2VVZFRMMGRsYlhoUU1FTnZNbkV2Y1U5alJUSnBkMFpOWW5aWE16WjBDbmR6VERSaVNHMDJjakIwUW1WMVMzVnRhSFZuUVRNclpuTlFSMkZvZDAxU1RFRmtaSFZoSzBGTldub3dOVzlxWW5wRVpuVXpTMGhMTkdKdFJUbFlWbElLZDI1NFNrNXlTV3MzU2pNclVreHhhMkpCU0hWRVNuZHFXakU0Tm1rM0x6WmxPVFJWUjFBNGVIQkZXSHBGTVdGQlp6WjNXREZ1VEdock0weHdVSE13WmdwUFIzZEljWE50ZGxoaVEyUjFXRFZqTDJkNWJqZG5UelZ3Tkd4RFYxQk5SalpUZWt0RU16Z3ZTV1J4Y0M5SlUwbHlVQ3RMVFdFNVpXNDRVVmhDTUdGUUNrVnljR0phTmxSU05tVlZNV2xOTVVwUFVua3pOV0ptUldGRVJrdGhjRnBxY1drM1JXTjBRV0p1U1dwVlUzVk9XWEl6YTJGSlkyWnJiMjVxTm5KV05HY0tTRFp1YkhoNlJUQTRUemx3Y0RWbmJtcGpZMloyWVVJcmExZHdlSGx3WkZCTFQxTnViV1ZzY1Zsa1kyeHRWVkJOTVdaTE4zTmxPSEZLU2xoNk1VSnRVd3BxVFVkWlZIWklURkl3UTI5UFVTdG1SVFJ4YlhkNFYzcGliMFZDU1N0eFNubFZhbnAxZEdOTlRFZGlXRmMyVkhWNlRuZGFVbWxwVDI5Wk1XOHlVR3hGQ2xOME4xaElVSGRvVUhCUk9GUkhhWGcxTlROdFQzbzNNazgzYkZweVRTdG9OV3g0U20weFNIVlNVRkZyUTFKSVkxQjZZMHg0V0V4eFZrNDJlbU52UmtRS1RqZ3JlVWx3WVdkcFNrSXdlREZZU1ZFMWRsazNiWFZqTnpjd2NFcDNkV2cxT1doS1pEWk9hbVJGWXk5TFYxRkJPREFyVEVsRWFWRm9hRFpYY0dabVR3cDNjMDgyTmsxaUwwVk5aRGxJWTFFeVQydzNOMWMwTm5CNlVVcERVRGx0YjNkb2F6MEtMUzB0TFMxRlRrUWdRMFZTVkVsR1NVTkJWRVV0TFMwdExRbz0KICAgIGNsaWVudC1rZXktZGF0YTogTFMwdExTMUNSVWRKVGlCU1UwRWdVRkpKVmtGVVJTQkxSVmt0TFMwdExRcE5TVWxLU25kSlFrRkJTME5CWjBWQk1uUkxXblJsTVdFNWN5OVBSa3gyWmtWTlkwbFNURmhEZWtGNWIyTXpWbVpRVTJKUmQybFZiV1Y1TjJabGRUWm1Da1JvYlZWT1JXSm5NWG93ZUhoNFNUazFNa1pJYkRWcVEyNHhiWEZ2YkVkNlRuY3JjSEpQTTBjM2NrSnpVM1pEU1hveFoyaGlWemxXVUc4MVpVeHNhMm9LWjNGWVVIUTFNR2h6VWtSQkwyaDFVMWRKYjBRek9USlJTWEZvWWpGR1lYTkNURVV3UmpCTGFqWnRaM3B1UVRkR1owUmljSFJCTjNCSllYWnlZMWx0ZWdwSVpXSk1NbTVaVjFGa1JWQnhhVzV0YW0xVVduSlhRbXMxVTA5d2NVdFJNa0pxVlZsVk5rUkdUa3h1UmtGcGJuY3JNbHA0UTJ0eVdXTnVaMGhSZUdWdUNtMXRVVmxOT0VOMmVUTjFXbUpVYTNkdGJVZHNTbmh2T1ZaaVRYSkVSMlJ6TVZsRVpqaDNOa3BVVWtGWmVTdE5OVWRhVG5NMWQzVk5TR05SY1hBcmRGY0tVMDAzY3pkMVJUbGtVbWM0UjNGS1ZXaFJUekp2ZVVka1V6WmtUM3B0TTFWUWVYZFRSR3RUV1V0UGMzUlRaVVpOVTBvNFVHSlhZWFJGYVhrNWJGVnViQXBCYjFONGJubGhObkF3UkRGU1FuQXJZMDE0UjFaS05rSkdMMDFMV1daWVpFdHZhM0p0Y0V0NFUwSk1UVTFaVlV0bGFFVkNNVTFFZWpGVlUxWXpUR2xaQ25KTVpqWnpNVlJEZFdwWllrRk1aMDluTnpjNGFIVTNRM3BtTkhwNFNIaExiSFIyZVZOQlFVMDBNalUzVVVaWVVXeFRZMGhpZUc1UU5sUlJSRzVtWm1VS1JEbDRhakZ1VVRKb1ZsVTBZamcxU1djMVIwMTRVR1ozUkM5eGFVeDROMnRoTW14TWNVUk1kblk1V0U5U2NrdFBSVE5FZEcxSk1IWlBSbFpqYW05T1RRbzFUVlZCWldNeVNHMUVZV1paTHpGR1FXbE1NRVI1YjJOWlpFOTBWV1pFV2l0U2NsWkpablZ2VmxJM1ZteHhSSEJrUVRKSlRWTjBUMHBOZERCNWVVUXJDbVpXYURKbGJsRnNURGhzWkdNNVYybHpUbUpDV1M5bVpFTlZObm8wV1hWUlJFZHZlbFV3YW14M1RWQkJRbVIxZG1oQ2VGaHdUemR0WVRrNFEwRjNSVUVLUVZGTFEwRm5RV2syYTBkbFpIRXplQzlpZUdKTlNreHhTVmRtWmxaelZYSlBPRmhTUkcxU1VUVktWMmQwVERkTlNIWkhTSE4yVm5ORldXSkdVa296ZUFwdGFFVk5UelIyYmtaSE1sRTRZek13UlZOSFdqTnpSbWwzY25kSVNFeFhSMDVzTlVKSmRHOW9aekpXY1VOaU5tNVRXalJpWkZKMWJXRkJRMXAzY0dWNUNtOW5TelZUVUhKNk5UWnRkMjFpUXpZMWRsRnZSVWRDU1VzeVNYUmFMMDk0Ym10cVJqSk9SMGx2VEhCMloxbFhVRmQwWjNCbFNtYzROa04xVlhkM2VsRUtSMkZUVUU5VWNGSmtRMUZNWkhaelExZE5kR3RZYW1SRmFrVndRMXBpSzNod2QyRmFWSE51YkhkNlZ6aE9OamhNY2t3d2VqVnNNVmN4UTNaTllta3haUXB2VnpCamMxZG9aelppTW5CWVNsWXlla042VGxGT09YSjJZa1lyU0dNMmIyNXBNMjF6YlROVk9TdEpSR2cyVFcxNVRITndjV1pLVG10aU4yRmhkRkZqQ21vck5XWk1Xa2RuTWpkUVZHMWlValJqYzNsMlVWaFZRbFV5TTFwNk1sWjRkVm96V0dKVE1VMXRXamcxYmxRelYybHZaRU5UYmpCU2RVMXFiWHBWYjBVS1EyWklabE5hYWt4RVR6a3lZWFpGVWxCek1VbGFaMmMzY1dwWGNuZFVZaXQ2Y1VvNVRuSkdZeTl0YkZnMWVGWk5Oblo2SzJsbGJXTk9ORmx3YlVwWWVBbzFlR3h0TTFoR1RXVm9aVTVPTkhCcVJYUlhZMmRRV1drMWNVSkJLMkZqUmxsaVpYWXdhMFpVU21GdWFubEthRTk0VGxWYVF6ZENNazlFYUM5b2NGSmlDbTFIUjNsNVEyUllUbFpvYUdsSFJtMTRLMHhHYm5weWNsTXJlVmhYUm5oSVR6UkdNMEo2UzFSbGFtNVRiQzlzSzFoc2RVSmFSRXRsVTJ0TFNHUjJTbGdLYjJGV2FqTk5XRmhxYTJSTE5rVmhNalpCYlRBd2RHOUlSR2wzVVRnMFlXdEdabU5VTkdwVVRWa3JkemhJTlU5a1ZqWkllVU42Y1ZKc1YzVm9TRTlPVXdwQk5FNWlNMjV1UVZWeGVVZFNWM1k1VG13NFZXRjFhalJOUkRKS1MyUndRaTlQUzIxWFEwbEJWVkZxT0d4MmRVNDBVVXREUVZGRlFUVmhVMHBwTlhKUkNsRmpTSFpvWkZwT2JFVjNXbmRTSzJOMlRuVnVkbkp4U1dkdEsxTkpVbkIzZHpOc1ZYQnBiMHN3Y201blVIbFNkbGRyTDNkd05reFVPWEJVWlhoU2JWZ0tkSGg0YUVKYVkxZDFhRlJ6YWsxcWFsWmpPVXRIZG1OTGREZEtMekoxY1UxSFZUVlVkekp2UTJOVU1XSm1Xbmg0YkhOWk5pdEtibEZMV0ZORVVqWnljQXBLTDFGSVptVmhVWGczTVdKMFRTdDVORTVTVVhCMGVXSnBiV042TXpZeVlXVlFjRWRDYWxwUU9GVXlLMUkwVmpjMmRERXdTbkl6VlZSbWVXWnRaWHAyQ2pOTFRVNDRPRzlHWmpkdlNtWnBZMUIwTXk5WGJYVjBjMDVtZWpKd05tNWtZelJwYUhsQmFrSm5jWE5HTUZnNWRDdHRRbTl4Umxab1YxbzFiRVV2UkhNS2RXazVZWG95Um5KR2ExaDZhelExY2pSTlp5c3ZhMkkzYUhkeVRubFRiRU5oZG5wR2VGRkxjblZUVjB0WWMxSldXbTkzYkZOa2NFcHFLMWxTYjNac1lncG1iMDR2VVZnNFREUmFaeTlGVVV0RFFWRkZRVGd2UVd0eVFXMW1kemRUTUhVNE5tZEZWVXRNY1c1aldsbDFkVWxDUzFZd1NqaE5TVlJDWjNoMWJIcGlDamw2TW5OQ00yNWhUbXhKTlVsV2JUVnVVRkpIUkRsRE0wSkNUazlLZVhsdWNsaHNjMWg0TjJGdVFtTlJNMXB5ZHpoYWVYZEVPVE13ZDFWeUsyVnJWVTBLYUdwMWVrZGhkMUZTZWpGSFJHVjBOa3A0VkZBd00xbDVPRkJSV1V0dWNrUXZRbWRyV21ZNU5VVXpNR1YzUTFKUWNtcFFOWGx3YkdoMmRITTFkMm8xTXdwT1NXMVVjbkZhZWpKQmNITnpiMGxyWkUxVFNsZ3JNbFZKYUhacGJUSnljbFZ6UlhkWFYzVTFhbWR0YmpGWWFVbDRUelJ2ZDFOUVRIWlhXUzkzYTFWeUNsZGlUR3MwY0V3NUt6TlVXRXBVZWxWSloyRTVTa2ROUTJkMFMxcHhZekJQYXpKa05TdFpWMFJsUW5SdlFYTlpSM1Y2VFVsVk5XaHFNVEJzYVdGR1ZIRUtUVGR4U1RWck9FeEpaRGRKWTFOeE1FRlRVVnBvZVhSUlVXOVZabkZMVDFwUmJFbGlaSFJFWWpkM1MwTkJVVUpNV1dOVFNUUkRkbTExWjNWMlUyeGhlZ3BFU0hkVWVXaFlRVnBRV21Wb1NYSldSR3g2VVc5M1dreEdSMUF5UnpaNmNqSlljRVZJSzJsNGJ6ZFphWGRUSzBaTVVEaHVaMmwzYzFCd1QxZHhlVGhhQ25KRk5uVk9Remw2T1hCVGFqTXhOVlZUVEV4NGIweGhWMmhCUXpWRUt6VXpWRFpZWkhsUFNEaHNWblU0VTFoc2MyTnJUelV6WkN0c1luUlRZWFp1Ym1VS1NqQnRXVkVyYlRkS1pHSklkak5yVEdGTE9EbHBTbHBDYVdnME9GbGpNME5NZW5ZM04wWlNkVVl6TTA5VVpHZEpUbHB2UzJoQ01rVjBjakpaZG10TmNBb3hNVGRSVnpOQmMxVjZiVmRLZUhWb1lWVldjV0ZxWXpSbGNYaHZjRzQ0Ymt4dk5qbFpNMEYwYkZWSmJIQTRiRXREZEZkNFVYY3ZhVmRxVFdORGFWZEdDamRVV2pCNFNHRnFSbVpwWm5KYWRGcHBMMFppVkVWRWVVdzRSMWd4ZWxkYWJFUnZhM1UxZDNoRGJWbG1TbEp0Y1hNclNYTk9iVU5VVjJkVlJ6aG1XbklLWlc1bFVrRnZTVUpCUmt3MlZFTTRkRTExYUhGcWRGRllla1ZGZVhoeWJXTjFPR296V0RWU1pFSTJPRU15T0RaMWNVUlFRbkJLTVhOdlFtdEhOMU5DZGdwU1ltMHZaMHhGVVUxemFuTmpWMVF3WjBSQk5VMHllVU5GYTJkc1FXRXpORGx4WVRkTWRIbDRUbEEyWjNaTlNVaHNXbkpZTlVKUVFrOVJTWGhyYmxBMUNrNTBlRVJVY0VRcmRHeGpla3hOTjJvMlZtbENNME55YW5ReldIVjFhWFpVT0hWTVprNTVLMFo0UzBkVVNGUnVSRGQwYWxKVlRrWlNVSGxuTkhaTk1IWUtaSEIzWlZGMlNuQmlSMVo1VG0xTFNEUTRVMFZWVkc5alRubHphbmh6UnpOTVVqQnFXRVJ5U1ROS2IyVmhRVFp6VDIxSlIwUXlTRFo0V0hOQ1JERTBOZ281TTJoWFVXSTJNVlpvSzB4bmJUUnVNekZrZDFKc1dVUTJLM3BvTm5JcmRtRjFhMDl1V0cxUFQxaFlaVXcxUVhKRFZYUXJTSGhEY210cFpuUnRWbUpVQ2twd1NFRlBaWHAwWWpkWFdVZFVkMWhrY0ZwNE1rRTVSVk5OTVZrM1NXTkRaMmRGUVVGcmMwWndMMkpWYTJKVmJtMVBabFJpZUdOd1owdFNPRUpISzA4S1MxSnJiMWRzTHpWTFRGTXdVVTFLU1RsbllrSjFXbXRrUlc1SVJsWkpNVGx5V2pZcllrRklVRVJyTkZkVWFIRjBRVXR1WVRFd1NUWmxja2d3UkVaWU1RcFlVMHhPV0dkTUszcE9lSEZLWmsxbGFrWnpPV1Y2V1Zsd1JFTTRkWEJKV0hsWk9HRlVNa0pTYmpGd05FVnVaRXhzTUZoM01rNXJNbHBKZEV0NU9HOXFDbWd4THpsUk1VVjFjRkkzWTBseE5uSkpVbFpDUlRsNE1uQnRMMWN5Um1SaFpHUXZhazlPYzNoNk5rOW1WM3BUYzNwcVZTOURlRE5pVTJGdVVVOXRNRk1LZGs1TVpWQjJNRGRYY0ZOU1JVOWtNbGsyUTFSUFRrbGxaRlIzVjAxdFQwOVBRVkJvVm1keVpYcDJSV1IxZGpWcFFXOWFhbE5LVG1RemRYbERTRk0wTWdwM2IyVnVhamhvZG5wQ2EydzFMMWN6U1VoMU5tcGpaSFZyT0RJNFZqZG1WVUZ3YURKWk5WVkRXRGxZZDFOMFdGcDZhR1JRZUVGQmRXRm5QVDBLTFMwdExTMUZUa1FnVWxOQklGQlNTVlpCVkVVZ1MwVlpMUzB0TFMwSwogICAgdG9rZW46IDU4M2VjYWNlZTk2MmUxMWU5ZGFkMTgxNDY3NjJhMjQ1Cg=="
+	// prepare to apply config file
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+	// add any fixed providers
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+	providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+	// A single state variable to track the lifecycle, starting with no state
+	var state *terraform.State
+	config := GetKubernetesPodTempalte(inlineconfig, kubernetesPodDefinition.Properties)
+	step := resource.TestStep{
+		Config: config,
+	}
+
+	responseBody, _ := json.Marshal(kubernetesPodDefinition)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+
+	go resource.ApplyConfig(opts, state, step)
+}
+
+func PutKubernetesPodNew(w http.ResponseWriter, req *http.Request) {
+	kubernetesPodDefinition := KubernetesPodDefinition{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&kubernetesPodDefinition)
+
+	inlineconfig := "YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6Ci0gY2x1c3RlcjoKICAgIGNlcnRpZmljYXRlLWF1dGhvcml0eS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VWNGVrTkRRWEVyWjBGM1NVSkJaMGxSVUVaWFoyOUtNa1JZVVhGWlJEbHlLM0F2VEdVNVJFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkVRVTRLVFZGemQwTlJXVVJXVVZGRVJYZEthbGxVUVdWR2R6QjRUMFJCZWsxRVozbE5lbFY1VGtSQ1lVWjNNSGxOUkVGNlRVUmplVTE2VlhsT1JFSmhUVUV3ZUFwRGVrRktRbWRPVmtKQlRWUkJiVTVvVFVsSlEwbHFRVTVDWjJ0eGFHdHBSemwzTUVKQlVVVkdRVUZQUTBGbk9FRk5TVWxEUTJkTFEwRm5SVUYyY0dReUNuWk5kRVJJVm5OVVN6Rm9PVWxhT1dwTmMwVllNak5FYXpCVVZrRkJaREpIT1VwVVMwSmtORUpDWkRkcU56SmxOMUpOWWtGVE1uZ3lhMU5uZVRGdEwySUtiblE0Y2tnelMwMDNiM2hoZUVaWGFVOU5ia05hZFVVMldXUkNOVUk0WkhRM1ZXTnBiMFp6UTFocGNGbHZjMmRuVUVOeWVWcEJUMWRuUTJoRlRtUXljUXBvTkhkUE5tWTRWeTlxWVRsd1RGVXpjM05hUmk5SVdEQlpTRlp6V0U5T1lXZFdhbE41WWxWdmVrTlJiVTR4ZVVOS1MxaEpLM29yV0VKRWNqRTVNV0pXQ204elJrOHJUelY0TUc4Mk1tSmtWMjFPU1c4MGFWVmtNMnN3WmpReGJub3pNMFZsY1Voc2JubFpWVmc0Wnk5V1ZUZDFZa1JOYlROT1ZIQlZOMDVSY0VrS1JtMWthRkZyZGpoSWExSm1WVGMwYW1oWGJIZG9kM2RMVm5WUFNpdENXWFZyUW5oR1p6VjFkSEZzY25OUWEzaGpjRm92U3pCVlNXSjFWV1UzV25wdFNBcHNWREZEZEVGT1FXRlVlVzl0VGsxRVVUYzNSR1JTTUhKRFVsZDVWeTg0Y1V4RGNIQm1Ta0ozYkd4NVpqbENTMHN3YVhGNE1uUkhlSEV2VUZGeGJUSm5DbGRhVEUxUmVXcDZRaTloVVRGd1EzWlNRMHBCYVdONWIxbHBSRmxvYjJWTVltdGxXbGswWlVjeWQyOXBOeTluUmtOTVZFZEhSR1p2YkdacVVtZG1VR1FLU1VoU2FFWXpVU3RwVlRSaGExcEVVWE5qVlRORFJIRlFhRU5vVDFVMmVYUXpSVXhDZVc1WGVYVk1SRkZOY25sT2Rrb3pTME4yZW5ZdldUTjZOM2hYZEFvMVJIcHFaemt5U0RoRlRubzRjSFJEUTFSMFZtWlpTMHB4U0RsS05XNU1NMDRyTjBGWE5FZG5Wa1ZJVlRCVFRESjZhVlZLZEdOaFJVRklUVFJYZVdvckNsSlZZUzgyWmxOMUsxbERTQ3R6YkhGaU5YcDBOVlZUTjJkbk9HRjJlSHBCWjA1VlF6QkZWbTVFZVc1WVJYZDZjbVI2TVZCb2NtMTFNekF5U0ZGcloxb0tjbGxQSzJoQlIxUjVUV2xqVDFaSmJITmtMMWd3TmxGWE5ubFFUMWxGU1hKMVJXNVFhRWx6UTBGM1JVRkJZVTFxVFVORmQwUm5XVVJXVWpCUVFWRklMd3BDUVZGRVFXZExhMDFCT0VkQk1WVmtSWGRGUWk5M1VVWk5RVTFDUVdZNGQwUlJXVXBMYjFwSmFIWmpUa0ZSUlV4Q1VVRkVaMmRKUWtGRWQwbERka2RWQ25kT1EyaHdOVU5sWWxGeFZ6RnpOQzltTVdVM1NsYzRRek16VVVKdE4zcElSWEJtZEVSMlZtcHBSUzh6ZVhkSU5HUm1aSFp6VWtoS01HWTNkRFJCV21ZS2IzRlRUR1ExY1hOWmNsbHpVRko1UVRsak4xSTJjSEpZZHk5NVVrTnBaM2hRYUU5Q0wwSnVUMUUwSzJWaWMwSkhTMU5zYTJoeVNWWmFORFZEUXpKMk5ncHRiV1ZZTDI1WWRsVkNNRmRpWmsxalZqRTFiQzlFWW5OcFEydDZSMUJTV25KSVNtMXZXRGhSTTNjMlRVeGpkVWh0WVN0MFptRnlORTlaSzNGNlkyd3JDa04yZVdaS1dURnFlRTAwUzNWNFVtSlRTVVZ4T1V0cWVEZGhiVUpQWm5WRWFubDBOSFp1UWpGRFJ6WmtjMU1yY2xGM2RETnhjVTlPU1U5SGVERk1iVVFLYVdRellqRm9jMjl5TDNkTWRrdENiR2xoWjFSSk9VWXJUVWwyWkZocGFXdENPWGxUU1RkTWJHNHZaMDQ1TWtvMVVsSkNTVTh6Wms5cmR6TnZSSEJuY3dwUlRXOU5SbG9yVlVOWFFWVmhkRFJpTVVScGFtSmlXVlI0ZHpGRWFHNVBibG80VVhoclpETjNXR1pxVWxkRVNXWmpURkF5T1ZsRFFYUnpOVzh6WVZrd0NuSlRVeXRVZEhGRE5teGpkSEZ6WW1VNVNIRlhSV2xZUlM4NVMxWkxWVkoyV1U5UVZHOUxjMEV4YW5SeGNEWkVTa3hFYkc4MFFsSlJOWE00Y0c1MWJWWUtPRTVsUzFsTE5tNTJRV0ZZWjBKTGFqRlpXRW8xUTNGMGRtcGtZbFJqZFVScFVpdGhaMU4xTVd4cVVYRXlVMFJSWWt4VmJsTnVkWGgxYVROS1ZWUlJTQXBDYUZGUWN6YzBWR016VjFVd2RFdEhSRVJ2VW1sME5XVTRRMmN6VG14WU1XeGFaMUpvVGxkWU5VOHZVMHRtU0hsWE5XRlBOeXRxWm1WTk0wNVNhalV4Q2tab1ZWSlhSSEZPWVRWUUsxUk1SSFkwZWxsWmVIaGlaWGRXY21SR1NuVklSeTl1U1NzNFl6UnhLMG92VFM5UlFtUnNhRTFwWTBoWGNXRnJSVFpWUTNNS1NXRnJlVzFJY1d4emJrZzFOR3gzTlU5QlNYazBjRGxwUjJGbVpYWm5WVGgwWmpGcUNpMHRMUzB0UlU1RUlFTkZVbFJKUmtsRFFWUkZMUzB0TFMwSwogICAgc2VydmVyOiBodHRwczovL215YWtzY2x1c3Qtd3Vka3ViZXJlc291cmNlZy1kMDVmNGUtYjNhMDQwYmIuaGNwLmVhc3R1cy5hem1rOHMuaW86NDQzCiAgbmFtZTogbXlBS1NDbHVzdGVyCmNvbnRleHRzOgotIGNvbnRleHQ6CiAgICBjbHVzdGVyOiBteUFLU0NsdXN0ZXIKICAgIHVzZXI6IGNsdXN0ZXJBZG1pbl93dWRrdWJlUmVzb3VyY2VHcm91cF9teUFLU0NsdXN0ZXIKICBuYW1lOiBteUFLU0NsdXN0ZXIKY3VycmVudC1jb250ZXh0OiBteUFLU0NsdXN0ZXIKa2luZDogQ29uZmlnCnByZWZlcmVuY2VzOiB7fQp1c2VyczoKLSBuYW1lOiBjbHVzdGVyQWRtaW5fd3Vka3ViZVJlc291cmNlR3JvdXBfbXlBS1NDbHVzdGVyCiAgdXNlcjoKICAgIGNsaWVudC1jZXJ0aWZpY2F0ZS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VVNWFrTkRRWFEyWjBGM1NVSkJaMGxSU1RoeVVuQlRSVzh6UTJkT1dtTlRVeXR4VUhaVFZFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkVRVTRLVFZGemQwTlJXVVJXVVZGRVJYZEthbGxVUVdWR2R6QjRUMFJCZWsxRVozbE5lbFY1VGtSR1lVWjNNSGxOUkVGNlRVUmplVTE2VlhsT1JFWmhUVU52ZUFwR2VrRldRbWRPVmtKQmIxUkViazQxWXpOU2JHSlVjSFJaV0U0d1dsaEtlazFST0hkRVVWbEVWbEZSUkVWM1dtcGlSMnhzWW01UmQyZG5TV2xOUVRCSENrTlRjVWRUU1dJelJGRkZRa0ZSVlVGQk5FbERSSGRCZDJkblNVdEJiMGxEUVZGRVlUQndiVEUzVm5JeWVqZzBWWFU1T0ZGNGQyaEZkR05NVFVSTGFIb0taRlk0T1VwMFJFTktVMW8zVEhRNU5qZHdPRTlIV2xFd1VuVkVXRkJVU0VoRmFqTnVXVlZsV0cxTlMyWlhZWEZwVldKTk0wUTJiWE0zWTJKMWMwZDRTd280U1dwUVYwTkdkR0l4VlN0cWJEUjFWMU5QUTNCakt6TnVVMGQ0UlUxRUswYzFTbGxwWjFCbU0xcEJhWEZHZGxWV2NYZEZjMVJSV0ZGeFVIRmhSRTlqQ2tSelYwRk9kVzB3UkhWcmFIRXJkSGhwWWsxa05YTjJZV1JvV2tJd1VTdHhTMlZoVDFwT2JYUlpSMVJzU1RadGIzQkVXVWRPVW1oVWIwMVZNSFZqVlVNS1MyWkVOMXB1UlV0VGRHaDVaVUZrUkVZMlpXRmFRbWQ2ZDBzdlRHVTFiSFJQVkVOaFdXRlZia2RxTVZaemVYTk5Xako2Vm1kT0wzcEViMnhPUlVKcVRBbzBlbXRhYXpKNmJrTTBkMlI0UTNGdU5qRmFTWHAxZW5VMFZERXhSMFIzWVc5c1UwWkJOMkZxU1ZveFRIQXdOMDlpWkZFdlRFSkpUMUpLWjI4MmVURktDalJWZUVsdWR6bDBXbkV3VTB4TU1sWlRaVlZEYUV4SFprcHljVzVSVUZaRlIyNDFkM3BGV2xWdWIwVllPSGR3YURsa01IRnBVM1ZoYTNKR1NVVnpkM2dLYUZGd05rVlJTRlYzVUZCV1VrcFlZM1ZLYVhOMEwzRjZWazFMTms1b2MwRjFRVFpFZG5aNVJ6ZHpURTR2YWxCRlprVnhWekl2U2tsQlFYcHFZbTUwUVFwV1pFTldTbmRrZGtkakwzQk9RVTlrT1RrMFVETkhVRmRrUkdGR1ZsUm9kbnByYVVScldYcEZPUzlCVUN0eFNYWklkVkp5WVZWMWIwMTFLeTh4WXpWSENuTnZORlJqVHpKWmFsTTRORlpXZVU5bk1IcHJlRkZDTlhwWlpWbE9jRGxxTDFWVlEwbDJVVkJMYUhob01EWXhVamhPYmpWSGRGVm9LelpvVmtoMFYxY0tiMDlzTUVSWlozaExNRFJyZVROVVRFbFFOVGxYU0ZvMlpFTlZkbmxXTVhveFlVdDNNWE5HYWprNU1FcFVjbEJvYVRWQlRXRnFUbFJUVDFoQmR6aEJSZ295Tml0RlNFWmxhemQxV25JemQwbEVRVkZCUW05NlZYZE5la0ZQUW1kT1ZraFJPRUpCWmpoRlFrRk5RMEpoUVhkRmQxbEVWbEl3YkVKQmQzZERaMWxKQ2t0M1dVSkNVVlZJUVhkSmQwUkJXVVJXVWpCVVFWRklMMEpCU1hkQlJFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkJUME5CWjBWQmIzRmhNbkp4U2s4S2JuaFJabEl4V1dobVkydEVkRGR0VWtGak4wNUxOazByVTFOU1JFeFJkV2x4TkhaU1NFVjRjMDVIY21WMk5tOUJORTF6UmpWTVNVcEtSalV4WWtZNVR3cHJRM0pPVjA1WVIzVjJTek4yWmt3ek1uTmphalYyZEVkUFZrcEtjMWt3YkdZd2VVZFRMMGRsYlhoUU1FTnZNbkV2Y1U5alJUSnBkMFpOWW5aWE16WjBDbmR6VERSaVNHMDJjakIwUW1WMVMzVnRhSFZuUVRNclpuTlFSMkZvZDAxU1RFRmtaSFZoSzBGTldub3dOVzlxWW5wRVpuVXpTMGhMTkdKdFJUbFlWbElLZDI1NFNrNXlTV3MzU2pNclVreHhhMkpCU0hWRVNuZHFXakU0Tm1rM0x6WmxPVFJWUjFBNGVIQkZXSHBGTVdGQlp6WjNXREZ1VEdock0weHdVSE13WmdwUFIzZEljWE50ZGxoaVEyUjFXRFZqTDJkNWJqZG5UelZ3Tkd4RFYxQk5SalpUZWt0RU16Z3ZTV1J4Y0M5SlUwbHlVQ3RMVFdFNVpXNDRVVmhDTUdGUUNrVnljR0phTmxSU05tVlZNV2xOTVVwUFVua3pOV0ptUldGRVJrdGhjRnBxY1drM1JXTjBRV0p1U1dwVlUzVk9XWEl6YTJGSlkyWnJiMjVxTm5KV05HY0tTRFp1YkhoNlJUQTRUemx3Y0RWbmJtcGpZMloyWVVJcmExZHdlSGx3WkZCTFQxTnViV1ZzY1Zsa1kyeHRWVkJOTVdaTE4zTmxPSEZLU2xoNk1VSnRVd3BxVFVkWlZIWklURkl3UTI5UFVTdG1SVFJ4YlhkNFYzcGliMFZDU1N0eFNubFZhbnAxZEdOTlRFZGlXRmMyVkhWNlRuZGFVbWxwVDI5Wk1XOHlVR3hGQ2xOME4xaElVSGRvVUhCUk9GUkhhWGcxTlROdFQzbzNNazgzYkZweVRTdG9OV3g0U20weFNIVlNVRkZyUTFKSVkxQjZZMHg0V0V4eFZrNDJlbU52UmtRS1RqZ3JlVWx3WVdkcFNrSXdlREZZU1ZFMWRsazNiWFZqTnpjd2NFcDNkV2cxT1doS1pEWk9hbVJGWXk5TFYxRkJPREFyVEVsRWFWRm9hRFpYY0dabVR3cDNjMDgyTmsxaUwwVk5aRGxJWTFFeVQydzNOMWMwTm5CNlVVcERVRGx0YjNkb2F6MEtMUzB0TFMxRlRrUWdRMFZTVkVsR1NVTkJWRVV0TFMwdExRbz0KICAgIGNsaWVudC1rZXktZGF0YTogTFMwdExTMUNSVWRKVGlCU1UwRWdVRkpKVmtGVVJTQkxSVmt0TFMwdExRcE5TVWxLU25kSlFrRkJTME5CWjBWQk1uUkxXblJsTVdFNWN5OVBSa3gyWmtWTlkwbFNURmhEZWtGNWIyTXpWbVpRVTJKUmQybFZiV1Y1TjJabGRUWm1Da1JvYlZWT1JXSm5NWG93ZUhoNFNUazFNa1pJYkRWcVEyNHhiWEZ2YkVkNlRuY3JjSEpQTTBjM2NrSnpVM1pEU1hveFoyaGlWemxXVUc4MVpVeHNhMm9LWjNGWVVIUTFNR2h6VWtSQkwyaDFVMWRKYjBRek9USlJTWEZvWWpGR1lYTkNURVV3UmpCTGFqWnRaM3B1UVRkR1owUmljSFJCTjNCSllYWnlZMWx0ZWdwSVpXSk1NbTVaVjFGa1JWQnhhVzV0YW0xVVduSlhRbXMxVTA5d2NVdFJNa0pxVlZsVk5rUkdUa3h1UmtGcGJuY3JNbHA0UTJ0eVdXTnVaMGhSZUdWdUNtMXRVVmxOT0VOMmVUTjFXbUpVYTNkdGJVZHNTbmh2T1ZaaVRYSkVSMlJ6TVZsRVpqaDNOa3BVVWtGWmVTdE5OVWRhVG5NMWQzVk5TR05SY1hBcmRGY0tVMDAzY3pkMVJUbGtVbWM0UjNGS1ZXaFJUekp2ZVVka1V6WmtUM3B0TTFWUWVYZFRSR3RUV1V0UGMzUlRaVVpOVTBvNFVHSlhZWFJGYVhrNWJGVnViQXBCYjFONGJubGhObkF3UkRGU1FuQXJZMDE0UjFaS05rSkdMMDFMV1daWVpFdHZhM0p0Y0V0NFUwSk1UVTFaVlV0bGFFVkNNVTFFZWpGVlUxWXpUR2xaQ25KTVpqWnpNVlJEZFdwWllrRk1aMDluTnpjNGFIVTNRM3BtTkhwNFNIaExiSFIyZVZOQlFVMDBNalUzVVVaWVVXeFRZMGhpZUc1UU5sUlJSRzVtWm1VS1JEbDRhakZ1VVRKb1ZsVTBZamcxU1djMVIwMTRVR1ozUkM5eGFVeDROMnRoTW14TWNVUk1kblk1V0U5U2NrdFBSVE5FZEcxSk1IWlBSbFpqYW05T1RRbzFUVlZCWldNeVNHMUVZV1paTHpGR1FXbE1NRVI1YjJOWlpFOTBWV1pFV2l0U2NsWkpablZ2VmxJM1ZteHhSSEJrUVRKSlRWTjBUMHBOZERCNWVVUXJDbVpXYURKbGJsRnNURGhzWkdNNVYybHpUbUpDV1M5bVpFTlZObm8wV1hWUlJFZHZlbFV3YW14M1RWQkJRbVIxZG1oQ2VGaHdUemR0WVRrNFEwRjNSVUVLUVZGTFEwRm5RV2syYTBkbFpIRXplQzlpZUdKTlNreHhTVmRtWmxaelZYSlBPRmhTUkcxU1VUVktWMmQwVERkTlNIWkhTSE4yVm5ORldXSkdVa296ZUFwdGFFVk5UelIyYmtaSE1sRTRZek13UlZOSFdqTnpSbWwzY25kSVNFeFhSMDVzTlVKSmRHOW9aekpXY1VOaU5tNVRXalJpWkZKMWJXRkJRMXAzY0dWNUNtOW5TelZUVUhKNk5UWnRkMjFpUXpZMWRsRnZSVWRDU1VzeVNYUmFMMDk0Ym10cVJqSk9SMGx2VEhCMloxbFhVRmQwWjNCbFNtYzROa04xVlhkM2VsRUtSMkZUVUU5VWNGSmtRMUZNWkhaelExZE5kR3RZYW1SRmFrVndRMXBpSzNod2QyRmFWSE51YkhkNlZ6aE9OamhNY2t3d2VqVnNNVmN4UTNaTllta3haUXB2VnpCamMxZG9aelppTW5CWVNsWXlla042VGxGT09YSjJZa1lyU0dNMmIyNXBNMjF6YlROVk9TdEpSR2cyVFcxNVRITndjV1pLVG10aU4yRmhkRkZqQ21vck5XWk1Xa2RuTWpkUVZHMWlValJqYzNsMlVWaFZRbFV5TTFwNk1sWjRkVm96V0dKVE1VMXRXamcxYmxRelYybHZaRU5UYmpCU2RVMXFiWHBWYjBVS1EyWklabE5hYWt4RVR6a3lZWFpGVWxCek1VbGFaMmMzY1dwWGNuZFVZaXQ2Y1VvNVRuSkdZeTl0YkZnMWVGWk5Oblo2SzJsbGJXTk9ORmx3YlVwWWVBbzFlR3h0TTFoR1RXVm9aVTVPTkhCcVJYUlhZMmRRV1drMWNVSkJLMkZqUmxsaVpYWXdhMFpVU21GdWFubEthRTk0VGxWYVF6ZENNazlFYUM5b2NGSmlDbTFIUjNsNVEyUllUbFpvYUdsSFJtMTRLMHhHYm5weWNsTXJlVmhYUm5oSVR6UkdNMEo2UzFSbGFtNVRiQzlzSzFoc2RVSmFSRXRsVTJ0TFNHUjJTbGdLYjJGV2FqTk5XRmhxYTJSTE5rVmhNalpCYlRBd2RHOUlSR2wzVVRnMFlXdEdabU5VTkdwVVRWa3JkemhJTlU5a1ZqWkllVU42Y1ZKc1YzVm9TRTlPVXdwQk5FNWlNMjV1UVZWeGVVZFNWM1k1VG13NFZXRjFhalJOUkRKS1MyUndRaTlQUzIxWFEwbEJWVkZxT0d4MmRVNDBVVXREUVZGRlFUVmhVMHBwTlhKUkNsRmpTSFpvWkZwT2JFVjNXbmRTSzJOMlRuVnVkbkp4U1dkdEsxTkpVbkIzZHpOc1ZYQnBiMHN3Y201blVIbFNkbGRyTDNkd05reFVPWEJVWlhoU2JWZ0tkSGg0YUVKYVkxZDFhRlJ6YWsxcWFsWmpPVXRIZG1OTGREZEtMekoxY1UxSFZUVlVkekp2UTJOVU1XSm1Xbmg0YkhOWk5pdEtibEZMV0ZORVVqWnljQXBLTDFGSVptVmhVWGczTVdKMFRTdDVORTVTVVhCMGVXSnBiV042TXpZeVlXVlFjRWRDYWxwUU9GVXlLMUkwVmpjMmRERXdTbkl6VlZSbWVXWnRaWHAyQ2pOTFRVNDRPRzlHWmpkdlNtWnBZMUIwTXk5WGJYVjBjMDVtZWpKd05tNWtZelJwYUhsQmFrSm5jWE5HTUZnNWRDdHRRbTl4Umxab1YxbzFiRVV2UkhNS2RXazVZWG95Um5KR2ExaDZhelExY2pSTlp5c3ZhMkkzYUhkeVRubFRiRU5oZG5wR2VGRkxjblZUVjB0WWMxSldXbTkzYkZOa2NFcHFLMWxTYjNac1lncG1iMDR2VVZnNFREUmFaeTlGVVV0RFFWRkZRVGd2UVd0eVFXMW1kemRUTUhVNE5tZEZWVXRNY1c1aldsbDFkVWxDUzFZd1NqaE5TVlJDWjNoMWJIcGlDamw2TW5OQ00yNWhUbXhKTlVsV2JUVnVVRkpIUkRsRE0wSkNUazlLZVhsdWNsaHNjMWg0TjJGdVFtTlJNMXB5ZHpoYWVYZEVPVE13ZDFWeUsyVnJWVTBLYUdwMWVrZGhkMUZTZWpGSFJHVjBOa3A0VkZBd00xbDVPRkJSV1V0dWNrUXZRbWRyV21ZNU5VVXpNR1YzUTFKUWNtcFFOWGx3YkdoMmRITTFkMm8xTXdwT1NXMVVjbkZhZWpKQmNITnpiMGxyWkUxVFNsZ3JNbFZKYUhacGJUSnljbFZ6UlhkWFYzVTFhbWR0YmpGWWFVbDRUelJ2ZDFOUVRIWlhXUzkzYTFWeUNsZGlUR3MwY0V3NUt6TlVXRXBVZWxWSloyRTVTa2ROUTJkMFMxcHhZekJQYXpKa05TdFpWMFJsUW5SdlFYTlpSM1Y2VFVsVk5XaHFNVEJzYVdGR1ZIRUtUVGR4U1RWck9FeEpaRGRKWTFOeE1FRlRVVnBvZVhSUlVXOVZabkZMVDFwUmJFbGlaSFJFWWpkM1MwTkJVVUpNV1dOVFNUUkRkbTExWjNWMlUyeGhlZ3BFU0hkVWVXaFlRVnBRV21Wb1NYSldSR3g2VVc5M1dreEdSMUF5UnpaNmNqSlljRVZJSzJsNGJ6ZFphWGRUSzBaTVVEaHVaMmwzYzFCd1QxZHhlVGhhQ25KRk5uVk9Remw2T1hCVGFqTXhOVlZUVEV4NGIweGhWMmhCUXpWRUt6VXpWRFpZWkhsUFNEaHNWblU0VTFoc2MyTnJUelV6WkN0c1luUlRZWFp1Ym1VS1NqQnRXVkVyYlRkS1pHSklkak5yVEdGTE9EbHBTbHBDYVdnME9GbGpNME5NZW5ZM04wWlNkVVl6TTA5VVpHZEpUbHB2UzJoQ01rVjBjakpaZG10TmNBb3hNVGRSVnpOQmMxVjZiVmRLZUhWb1lWVldjV0ZxWXpSbGNYaHZjRzQ0Ymt4dk5qbFpNMEYwYkZWSmJIQTRiRXREZEZkNFVYY3ZhVmRxVFdORGFWZEdDamRVV2pCNFNHRnFSbVpwWm5KYWRGcHBMMFppVkVWRWVVdzRSMWd4ZWxkYWJFUnZhM1UxZDNoRGJWbG1TbEp0Y1hNclNYTk9iVU5VVjJkVlJ6aG1XbklLWlc1bFVrRnZTVUpCUmt3MlZFTTRkRTExYUhGcWRGRllla1ZGZVhoeWJXTjFPR296V0RWU1pFSTJPRU15T0RaMWNVUlFRbkJLTVhOdlFtdEhOMU5DZGdwU1ltMHZaMHhGVVUxemFuTmpWMVF3WjBSQk5VMHllVU5GYTJkc1FXRXpORGx4WVRkTWRIbDRUbEEyWjNaTlNVaHNXbkpZTlVKUVFrOVJTWGhyYmxBMUNrNTBlRVJVY0VRcmRHeGpla3hOTjJvMlZtbENNME55YW5ReldIVjFhWFpVT0hWTVprNTVLMFo0UzBkVVNGUnVSRGQwYWxKVlRrWlNVSGxuTkhaTk1IWUtaSEIzWlZGMlNuQmlSMVo1VG0xTFNEUTRVMFZWVkc5alRubHphbmh6UnpOTVVqQnFXRVJ5U1ROS2IyVmhRVFp6VDIxSlIwUXlTRFo0V0hOQ1JERTBOZ281TTJoWFVXSTJNVlpvSzB4bmJUUnVNekZrZDFKc1dVUTJLM3BvTm5JcmRtRjFhMDl1V0cxUFQxaFlaVXcxUVhKRFZYUXJTSGhEY210cFpuUnRWbUpVQ2twd1NFRlBaWHAwWWpkWFdVZFVkMWhrY0ZwNE1rRTVSVk5OTVZrM1NXTkRaMmRGUVVGcmMwWndMMkpWYTJKVmJtMVBabFJpZUdOd1owdFNPRUpISzA4S1MxSnJiMWRzTHpWTFRGTXdVVTFLU1RsbllrSjFXbXRrUlc1SVJsWkpNVGx5V2pZcllrRklVRVJyTkZkVWFIRjBRVXR1WVRFd1NUWmxja2d3UkVaWU1RcFlVMHhPV0dkTUszcE9lSEZLWmsxbGFrWnpPV1Y2V1Zsd1JFTTRkWEJKV0hsWk9HRlVNa0pTYmpGd05FVnVaRXhzTUZoM01rNXJNbHBKZEV0NU9HOXFDbWd4THpsUk1VVjFjRkkzWTBseE5uSkpVbFpDUlRsNE1uQnRMMWN5Um1SaFpHUXZhazlPYzNoNk5rOW1WM3BUYzNwcVZTOURlRE5pVTJGdVVVOXRNRk1LZGs1TVpWQjJNRGRYY0ZOU1JVOWtNbGsyUTFSUFRrbGxaRlIzVjAxdFQwOVBRVkJvVm1keVpYcDJSV1IxZGpWcFFXOWFhbE5LVG1RemRYbERTRk0wTWdwM2IyVnVhamhvZG5wQ2EydzFMMWN6U1VoMU5tcGpaSFZyT0RJNFZqZG1WVUZ3YURKWk5WVkRXRGxZZDFOMFdGcDZhR1JRZUVGQmRXRm5QVDBLTFMwdExTMUZUa1FnVWxOQklGQlNTVlpCVkVVZ1MwVlpMUzB0TFMwSwogICAgdG9rZW46IDU4M2VjYWNlZTk2MmUxMWU5ZGFkMTgxNDY3NjJhMjQ1Cg=="
+	//inlineconfig := getSecretFromKeyVault(kubernetesPodDefinition.Properties.KeyVaultURI, kubernetesPodDefinition.Properties.KeyVaultSecretName, kubernetesPodDefinition.Properties.KeyVaultSecretVersion)
+	decoded, _ := base64.StdEncoding.DecodeString(inlineconfig)
+	decodedInlineconfig := string(decoded)
+
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+	//providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	// opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+
+	// var state *terraform.State
+	configFile := GetKubernetesPodTempalte(decodedInlineconfig, kubernetesPodDefinition.Properties)
+	// step := resource.TestStep{
+	// 	Config: configFile,
+	// }
+
+	responseBody, _ := json.Marshal(kubernetesPodDefinition)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+
+	provider := testAccProviders["kubernetes"]
+
+	cfg, err := config.Load(configFile)
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
+
+	for _, v := range cfg.ProviderConfigs {
+		provider.Configure(terraform.NewResourceConfig(v.RawConfig))
+	}
+
+	info := &terraform.InstanceInfo{
+		Type: "kubernetes_pod",
+	}
+
+	for _, v := range cfg.Resources {
+		state := new(terraform.InstanceState)
+		state.Init()
+		diff, err := provider.Diff(info, state, terraform.NewResourceConfig(v.RawConfig))
+		if err != nil {
+			fmt.Printf("%s", err)
+		}
+		newState := new(terraform.InstanceState)
+		newState.Init()
+
+		provider.Apply(info, newState, diff)
+
+		// resource, ok := provider.(*schema.Provider).ResourcesMap[info.Type]
+		// if !ok {
+		// 	fmt.Printf("unknown resource type: %s", info.Type)
+		// }
+
+		// data, _ := resource.GetResourceData(newState, diff)
+		// data.MarkNewResource()
+		// err = resource.Create(data, provider.(*schema.Provider).Meta())
+	}
+}
+
+func PutKubernetesService(w http.ResponseWriter, req *http.Request) {
+	kubernetesServiceDefinition := KubernetesServiceDefinition{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&kubernetesServiceDefinition)
+
+	out, err := exec.Command("uuidgen").Output()
+	if err != nil {
+		log.Fatal(err)
+	}
+	configFileName := fmt.Sprintf("/tmp/%s", base32.StdEncoding.EncodeToString(out))
+	fmt.Printf("%s", configFileName)
+
+	resp, err := http.Get(kubernetesServiceDefinition.Properties.KubeConfigFileUri)
+	if err != nil {
+		log.Fatal("Cannot download config file", err)
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+
+	file, err := os.Create(configFileName)
+	if err != nil {
+		log.Fatal("Cannot create file", err)
+	}
+	defer file.Close()
+
+	fmt.Fprintf(file, string(body))
+
+	// prepare to apply config file
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+	// add any fixed providers
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+	providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+	// A single state variable to track the lifecycle, starting with no state
+	var state *terraform.State
+	config := GetKubernetesServiceTempalte(configFileName, kubernetesServiceDefinition.Properties)
+	step := resource.TestStep{
+		Config: config,
+	}
+
+	responseBody, _ := json.Marshal(kubernetesServiceDefinition)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+
+	go resource.ApplyConfig(opts, state, step)
+}
+
+func PutDockerImage(w http.ResponseWriter, req *http.Request) {
+	dockerImageDefinition := DockerImageDefinition{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&dockerImageDefinition)
+
+	out, err := exec.Command("uuidgen").Output()
+	if err != nil {
+		log.Fatal(err)
+	}
+	configFileName := fmt.Sprintf("/tmp/%s", base32.StdEncoding.EncodeToString(out))
+	fmt.Printf("%s", configFileName)
+
+	resp, err := http.Get(dockerImageDefinition.Properties.SwaggerFileUri)
+	if err != nil {
+		log.Fatal("Cannot download config file", err)
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+
+	file, err := os.Create(configFileName)
+	if err != nil {
+		log.Fatal("Cannot create file", err)
+	}
+	defer file.Close()
+
+	fmt.Fprintf(file, string(body))
+
+	out, err = exec.Command("uuidgen").Output()
+	if err != nil {
+		log.Fatal(err)
+	}
+	outputDir := fmt.Sprintf("/tmp/%s/", base32.StdEncoding.EncodeToString(out))
+	fmt.Printf("%s", outputDir)
+
+	codegenCommand := "java -jar ./swagger-codegen-cli.jar generate -l aspnetcore -i " + configFileName + " -o " + outputDir
+	out, err = exec.Command("bash", "-c", codegenCommand).CombinedOutput()
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(string(out))
+
+	go rpforrp.BuildAndPushImageFromDockerfile(outputDir, dockerImageDefinition.Properties.ImageName, dockerImageDefinition.Properties.DockerhubAccount, dockerImageDefinition.Properties.DockerhubPassword)
+
+	responseBody, _ := json.Marshal(dockerImageDefinition)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+
+	kubernetesServiceDefinition := KubernetesServiceDefinitionProperties{
+		KubeConfigFileUri: "https://wudapp.blob.core.windows.net/appliance/config",
+		ServiceName:       "rp4rp",
+		TargetPodName:     "rp4rp",
+		Port:              80,
+		TargetPort:        5000}
+
+	out, err = exec.Command("uuidgen").Output()
+	if err != nil {
+		log.Fatal(err)
+	}
+	kubeConfigFileName := fmt.Sprintf("/tmp/%s", base32.StdEncoding.EncodeToString(out))
+	fmt.Printf("%s", kubeConfigFileName)
+
+	resp, err = http.Get(kubernetesServiceDefinition.KubeConfigFileUri)
+	if err != nil {
+		log.Fatal("Cannot download config file", err)
+	}
+	defer resp.Body.Close()
+	body, err = ioutil.ReadAll(resp.Body)
+
+	kubeConfigfile, err := os.Create(kubeConfigFileName)
+	if err != nil {
+		log.Fatal("Cannot create file", err)
+	}
+	defer file.Close()
+
+	fmt.Fprintf(kubeConfigfile, string(body))
+
+	// prepare to apply config file
+	ctxProviders := make(map[string]terraform.ResourceProviderFactory)
+	// add any fixed providers
+	for k, p := range testAccProviders {
+		ctxProviders[k] = terraform.ResourceProviderFactoryFixed(p)
+	}
+	providerResolver := terraform.ResourceProviderResolverFixed(ctxProviders)
+	opts := terraform.ContextOpts{ProviderResolver: providerResolver}
+	// A single state variable to track the lifecycle, starting with no state
+	var serviceState *terraform.State
+	serviceConfig := GetKubernetesServiceTempalte(kubeConfigFileName, kubernetesServiceDefinition)
+	serviceStep := resource.TestStep{
+		Config: serviceConfig,
+	}
+
+	go resource.ApplyConfig(opts, serviceState, serviceStep)
+
+	kubernetesPodDefinition := KubernetesPodDefinitionProperties{
+		KubeConfigFileUri: "https://wudapp.blob.core.windows.net/appliance/config",
+		PodName:           "rp4rp",
+		ContainerImage:    dockerImageDefinition.Properties.ImageName,
+		ContainerName:     "rp4rp",
+		ContainerPort:     5000}
+
+	var podState *terraform.State
+	podConfig := GetKubernetesPodTempalte(kubeConfigFileName, kubernetesPodDefinition)
+	podStep := resource.TestStep{
+		Config: podConfig,
+	}
+
+	go resource.ApplyConfig(opts, podState, podStep)
+}
+
+func NotFound(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(404)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.Encode(Error{Error: ErrorDetails{Code: "RequestUriInvalid", Message: "Invalid request URI."}})
+}
+
+func GetDatadogMonitorTempalte(definition DatadogMonitorTemplateDefinition) string {
+	return fmt.Sprintf(`
+provider "datadog" {
+  api_key = "%s"
+  app_key = "%s"
+}
+
+resource "datadog_monitor" "%s" {
+  name = "%s"
+  type = "metric alert"
+  message = "some message Notify: @hipchat-channel"
+  escalation_message = "the situation has escalated @pagerduty"
+
+  query = "avg(last_1h):avg:aws.ec2.cpu{environment:foo,host:foo} by {host} > 2"
+
+  thresholds {
+        warning = "1.0"
+        critical = "2.0"
+  }
+
+  renotify_interval = 60
+
+  notify_audit = false
+  timeout_h = 60
+  new_host_delay = 600
+  evaluation_delay = 700
+  include_tags = true
+  require_full_window = true
+  locked = false
+  tags = ["foo:bar", "baz"]
+}
+`, definition.Properties.ApiKey, definition.Properties.Appkey, definition.Properties.MonitorName, definition.Properties.MonitorName)
+}
+
+func GetDatadogTimeboardTempalte(definition DatadogTimeboardTemplateDefinition) string {
+	return fmt.Sprintf(`
+provider "datadog" {
+  api_key = "%s"
+  app_key = "%s"
+}
+
+resource "datadog_timeboard" "%s" {
+  title       = "%s"
+  description = "%s"
+  read_only   = true
+
+  graph {
+    title = "%s"
+    viz   = "%s"
+
+    request {
+      "q" = "%s"
+      "type" = "line"
+      "aggregator" = "avg"
+    }
+  }
+}
+`, definition.Properties.ApiKey, definition.Properties.Appkey, definition.Properties.TimeboardName, definition.Properties.TimeboardTitle, definition.Properties.TimeboardDescription,
+		definition.Properties.GraphTitle, definition.Properties.GraphViz, definition.Properties.GraphQuery)
+}
+
+func GetKubernetesTempalte(configFileName string, kubeConfig string) string {
+	return fmt.Sprintf(`
+provider "kubernetes" {
+  config_path = "%s"
+}
+
+%s
+`, configFileName, kubeConfig)
+}
+
+func GetKubernetesPodTempalte(configFile string, kubenetesPodProperties KubernetesPodDefinitionProperties) string {
+	return fmt.Sprintf(`
+		{
+			"provider": {
+				"kubernetes": {
+					"inline_config": %q
+				}
+			},
+			"resource": {
+				"kubernetes_pod": {
+					"%s": {
+						"metadata": [{
+							"name": "%s",
+							"labels": {
+								"App": "%s"
+							}
+						}],
+						"spec": [{
+							"container": {
+								"image": "%s",
+								"name": "%s",
+								"port": {
+									"container_port": %d
+								}
+							}
+						}]
+					}
+				}
+			}
+		}
+`, []byte(configFile), kubenetesPodProperties.PodName, kubenetesPodProperties.PodName, kubenetesPodProperties.PodName, kubenetesPodProperties.ContainerImage, kubenetesPodProperties.ContainerName, kubenetesPodProperties.ContainerPort)
+}
+
+func GetKubernetesServiceTempalte(configFileName string, kubenetesServiceProperties KubernetesServiceDefinitionProperties) string {
+	return fmt.Sprintf(`
+provider "kubernetes" {
+  config_path = "%s"
+}
+
+resource "kubernetes_service" "%s" {
+	metadata {
+	  name = "%s"
+	}
+	spec {
+	  selector {
+		App = "%s"
+	  }
+	  port {
+		port = %d
+		target_port = %d
+	  }
+  
+	  type = "LoadBalancer"
+	}
+  }
+`, configFileName, kubenetesServiceProperties.ServiceName, kubenetesServiceProperties.ServiceName, kubenetesServiceProperties.TargetPodName, kubenetesServiceProperties.Port, kubenetesServiceProperties.TargetPort)
+}
+
+func getSecretFromKeyVault(vaultBaseUri string, SecretName string, SecretVersion string) string {
+	fmt.Printf("uri %s", vaultBaseUri)
+	fmt.Printf("name %s", SecretName)
+	fmt.Printf("version %s", SecretVersion)
+
+	clientID := "c7d7472f-2fd3-40af-9416-f769e8b88a09"
+	clientSecret := "0a55595f-016b-49ea-a9c7-e4adc798cd92"
+	tenantID := "72f988bf-86f1-41af-91ab-2d7cd011db47"
+
+	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, tenantID)
+	updatedAuthorizeEndpoint, err := url.Parse("https://login.windows.net/" + tenantID + "/oauth2/token")
+	oauthConfig.AuthorizeEndpoint = *updatedAuthorizeEndpoint
+	spToken, err := adal.NewServicePrincipalToken(*oauthConfig, clientID, clientSecret, "https://vault.azure.net")
+
+	if err != nil {
+		log.Fatal("failed to create token", err)
+	}
+
+	vaultsClient := keyvault.NewWithoutDefaults()
+	vaultsClient.Authorizer = autorest.NewBearerAuthorizer(spToken)
+
+	vault, err := vaultsClient.GetSecret(context.Background(), "https://terraformkv.vault.azure.net/", "kubeconfig", "5cf4db27b613472f89c91fd9192decd1")
+	if err != nil {
+		log.Fatal("Failed to get secret ", err)
+	}
+	return *vault.Value
+}
+
+type Package struct {
+	Id           bson.ObjectId `bson:"_id,omitempty"`
+	ResourceId   string
+	ProviderName string
+	Config       string
+}
+
+type Provider struct {
+	Location   string
+	Properties PoviderProperties
+}
+
+type PoviderProperties struct {
+	ProviderName string
+	Settings     PoviderSettings
+}
+
+type PoviderSettings struct {
+	Config string
+}
+
+type Resource struct {
+	Location   string
+	Properties ResourceProperties
+}
+
+type ResourceProperties struct {
+	ProviderID   string
+	ResourceName string
+	Settings     interface{}
+}
+
+func getKubernetesTemplateInJson(configFile []byte, resource Resource, resourceID string, resourceSpec []byte) string {
+	return fmt.Sprintf(`
+		{
+			"provider": {
+				"kubernetes": {
+					"inline_config": %q
+				}
+			},
+			"resource": {
+				"%s": {
+					"%s": %s
+				}
+			}
+		}
+`, configFile, resource.Properties.ResourceName, resourceID, string(resourceSpec))
+}
+
+func putProvider(w http.ResponseWriter, req *http.Request) {
+	params := mux.Vars(req)
+	fullyQualifiedResourceID := "/subscriptions/" + params["subscriptionId"] + "/resourcegroups/" + params["resourceGroup"] + "/providers/Microsoft.Terraform-OSS/provider/" + params["provider"]
+
+	provider := Provider{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&provider)
+
+	database := "tfrp001"
+	password := "TXWxRsEbZBrBUCJaq3Zu2NqdfafLJcdbKu8rJ6dwKBnjRzfSIwJ8vh23gxRof7GNhOgfeZjfqKL1M7fMWiWQEw=="
+
+	// DialInfo holds options for establishing a session with a MongoDB cluster.
+	dialInfo := &mgo.DialInfo{
+		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", database)}, // Get HOST + PORT
+		Timeout:  60 * time.Second,
+		Database: database, // It can be anything
+		Username: database, // Username
+		Password: password, // PASSWORD
+		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
+			return tls.Dial("tcp", addr.String(), &tls.Config{})
+		},
+	}
+
+	// Create a session which maintains a pool of socket connections
+	// to our MongoDB.
+	session, err := mgo.DialWithInfo(dialInfo)
+
+	if err != nil {
+		fmt.Printf("Can't connect to mongo, go error %v\n", err)
+		os.Exit(1)
+	}
+
+	defer session.Close()
+
+	// SetSafe changes the session safety mode.
+	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
+	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
+	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
+	session.SetSafe(&mgo.Safe{})
+
+	// get collection
+	collection := session.DB(database).C("provider")
+
+	// insert Document in collection
+	err = collection.Insert(&Package{
+		ResourceId:   fullyQualifiedResourceID,
+		ProviderName: provider.Properties.ProviderName,
+		Config:       provider.Properties.Settings.Config,
+	})
+
+	if err != nil {
+		log.Fatal("Problem inserting data: ", err)
+		return
+	}
+
+	// Get Document from collection
+	result := Package{}
+	err = collection.Find(bson.M{"resourceid": fullyQualifiedResourceID}).One(&result)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	responseBody, _ := json.Marshal(provider)
+	w.Write(responseBody)
+}
+
+func putResource(w http.ResponseWriter, req *http.Request) {
+	resource := Resource{}
+	defer req.Body.Close()
+	json.NewDecoder(req.Body).Decode(&resource)
+
+	database := "tfrp001"
+	password := "TXWxRsEbZBrBUCJaq3Zu2NqdfafLJcdbKu8rJ6dwKBnjRzfSIwJ8vh23gxRof7GNhOgfeZjfqKL1M7fMWiWQEw=="
+
+	// DialInfo holds options for establishing a session with a MongoDB cluster.
+	dialInfo := &mgo.DialInfo{
+		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", database)}, // Get HOST + PORT
+		Timeout:  60 * time.Second,
+		Database: database, // It can be anything
+		Username: database, // Username
+		Password: password, // PASSWORD
+		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
+			return tls.Dial("tcp", addr.String(), &tls.Config{})
+		},
+	}
+
+	// Create a session which maintains a pool of socket connections
+	// to our MongoDB.
+	session, err := mgo.DialWithInfo(dialInfo)
+
+	if err != nil {
+		fmt.Printf("Can't connect to mongo, go error %v\n", err)
+		os.Exit(1)
+	}
+
+	defer session.Close()
+
+	// SetSafe changes the session safety mode.
+	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
+	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
+	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
+	session.SetSafe(&mgo.Safe{})
+
+	// get collection
+	collection := session.DB(database).C("provider")
+
+	// Get Document from collection
+	result := Package{}
+	err = collection.Find(bson.M{"resourceid": resource.Properties.ProviderID}).One(&result)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	//inlineconfig := "YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6Ci0gY2x1c3RlcjoKICAgIGNlcnRpZmljYXRlLWF1dGhvcml0eS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VWNGVrTkRRWEVyWjBGM1NVSkJaMGxSVUVaWFoyOUtNa1JZVVhGWlJEbHlLM0F2VEdVNVJFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkVRVTRLVFZGemQwTlJXVVJXVVZGRVJYZEthbGxVUVdWR2R6QjRUMFJCZWsxRVozbE5lbFY1VGtSQ1lVWjNNSGxOUkVGNlRVUmplVTE2VlhsT1JFSmhUVUV3ZUFwRGVrRktRbWRPVmtKQlRWUkJiVTVvVFVsSlEwbHFRVTVDWjJ0eGFHdHBSemwzTUVKQlVVVkdRVUZQUTBGbk9FRk5TVWxEUTJkTFEwRm5SVUYyY0dReUNuWk5kRVJJVm5OVVN6Rm9PVWxhT1dwTmMwVllNak5FYXpCVVZrRkJaREpIT1VwVVMwSmtORUpDWkRkcU56SmxOMUpOWWtGVE1uZ3lhMU5uZVRGdEwySUtiblE0Y2tnelMwMDNiM2hoZUVaWGFVOU5ia05hZFVVMldXUkNOVUk0WkhRM1ZXTnBiMFp6UTFocGNGbHZjMmRuVUVOeWVWcEJUMWRuUTJoRlRtUXljUXBvTkhkUE5tWTRWeTlxWVRsd1RGVXpjM05hUmk5SVdEQlpTRlp6V0U5T1lXZFdhbE41WWxWdmVrTlJiVTR4ZVVOS1MxaEpLM29yV0VKRWNqRTVNV0pXQ204elJrOHJUelY0TUc4Mk1tSmtWMjFPU1c4MGFWVmtNMnN3WmpReGJub3pNMFZsY1Voc2JubFpWVmc0Wnk5V1ZUZDFZa1JOYlROT1ZIQlZOMDVSY0VrS1JtMWthRkZyZGpoSWExSm1WVGMwYW1oWGJIZG9kM2RMVm5WUFNpdENXWFZyUW5oR1p6VjFkSEZzY25OUWEzaGpjRm92U3pCVlNXSjFWV1UzV25wdFNBcHNWREZEZEVGT1FXRlVlVzl0VGsxRVVUYzNSR1JTTUhKRFVsZDVWeTg0Y1V4RGNIQm1Ta0ozYkd4NVpqbENTMHN3YVhGNE1uUkhlSEV2VUZGeGJUSm5DbGRhVEUxUmVXcDZRaTloVVRGd1EzWlNRMHBCYVdONWIxbHBSRmxvYjJWTVltdGxXbGswWlVjeWQyOXBOeTluUmtOTVZFZEhSR1p2YkdacVVtZG1VR1FLU1VoU2FFWXpVU3RwVlRSaGExcEVVWE5qVlRORFJIRlFhRU5vVDFVMmVYUXpSVXhDZVc1WGVYVk1SRkZOY25sT2Rrb3pTME4yZW5ZdldUTjZOM2hYZEFvMVJIcHFaemt5U0RoRlRubzRjSFJEUTFSMFZtWlpTMHB4U0RsS05XNU1NMDRyTjBGWE5FZG5Wa1ZJVlRCVFRESjZhVlZLZEdOaFJVRklUVFJYZVdvckNsSlZZUzgyWmxOMUsxbERTQ3R6YkhGaU5YcDBOVlZUTjJkbk9HRjJlSHBCWjA1VlF6QkZWbTVFZVc1WVJYZDZjbVI2TVZCb2NtMTFNekF5U0ZGcloxb0tjbGxQSzJoQlIxUjVUV2xqVDFaSmJITmtMMWd3TmxGWE5ubFFUMWxGU1hKMVJXNVFhRWx6UTBGM1JVRkJZVTFxVFVORmQwUm5XVVJXVWpCUVFWRklMd3BDUVZGRVFXZExhMDFCT0VkQk1WVmtSWGRGUWk5M1VVWk5RVTFDUVdZNGQwUlJXVXBMYjFwSmFIWmpUa0ZSUlV4Q1VVRkVaMmRKUWtGRWQwbERka2RWQ25kT1EyaHdOVU5sWWxGeFZ6RnpOQzltTVdVM1NsYzRRek16VVVKdE4zcElSWEJtZEVSMlZtcHBSUzh6ZVhkSU5HUm1aSFp6VWtoS01HWTNkRFJCV21ZS2IzRlRUR1ExY1hOWmNsbHpVRko1UVRsak4xSTJjSEpZZHk5NVVrTnBaM2hRYUU5Q0wwSnVUMUUwSzJWaWMwSkhTMU5zYTJoeVNWWmFORFZEUXpKMk5ncHRiV1ZZTDI1WWRsVkNNRmRpWmsxalZqRTFiQzlFWW5OcFEydDZSMUJTV25KSVNtMXZXRGhSTTNjMlRVeGpkVWh0WVN0MFptRnlORTlaSzNGNlkyd3JDa04yZVdaS1dURnFlRTAwUzNWNFVtSlRTVVZ4T1V0cWVEZGhiVUpQWm5WRWFubDBOSFp1UWpGRFJ6WmtjMU1yY2xGM2RETnhjVTlPU1U5SGVERk1iVVFLYVdRellqRm9jMjl5TDNkTWRrdENiR2xoWjFSSk9VWXJUVWwyWkZocGFXdENPWGxUU1RkTWJHNHZaMDQ1TWtvMVVsSkNTVTh6Wms5cmR6TnZSSEJuY3dwUlRXOU5SbG9yVlVOWFFWVmhkRFJpTVVScGFtSmlXVlI0ZHpGRWFHNVBibG80VVhoclpETjNXR1pxVWxkRVNXWmpURkF5T1ZsRFFYUnpOVzh6WVZrd0NuSlRVeXRVZEhGRE5teGpkSEZ6WW1VNVNIRlhSV2xZUlM4NVMxWkxWVkoyV1U5UVZHOUxjMEV4YW5SeGNEWkVTa3hFYkc4MFFsSlJOWE00Y0c1MWJWWUtPRTVsUzFsTE5tNTJRV0ZZWjBKTGFqRlpXRW8xUTNGMGRtcGtZbFJqZFVScFVpdGhaMU4xTVd4cVVYRXlVMFJSWWt4VmJsTnVkWGgxYVROS1ZWUlJTQXBDYUZGUWN6YzBWR016VjFVd2RFdEhSRVJ2VW1sME5XVTRRMmN6VG14WU1XeGFaMUpvVGxkWU5VOHZVMHRtU0hsWE5XRlBOeXRxWm1WTk0wNVNhalV4Q2tab1ZWSlhSSEZPWVRWUUsxUk1SSFkwZWxsWmVIaGlaWGRXY21SR1NuVklSeTl1U1NzNFl6UnhLMG92VFM5UlFtUnNhRTFwWTBoWGNXRnJSVFpWUTNNS1NXRnJlVzFJY1d4emJrZzFOR3gzTlU5QlNYazBjRGxwUjJGbVpYWm5WVGgwWmpGcUNpMHRMUzB0UlU1RUlFTkZVbFJKUmtsRFFWUkZMUzB0TFMwSwogICAgc2VydmVyOiBodHRwczovL215YWtzY2x1c3Qtd3Vka3ViZXJlc291cmNlZy1kMDVmNGUtYjNhMDQwYmIuaGNwLmVhc3R1cy5hem1rOHMuaW86NDQzCiAgbmFtZTogbXlBS1NDbHVzdGVyCmNvbnRleHRzOgotIGNvbnRleHQ6CiAgICBjbHVzdGVyOiBteUFLU0NsdXN0ZXIKICAgIHVzZXI6IGNsdXN0ZXJBZG1pbl93dWRrdWJlUmVzb3VyY2VHcm91cF9teUFLU0NsdXN0ZXIKICBuYW1lOiBteUFLU0NsdXN0ZXIKY3VycmVudC1jb250ZXh0OiBteUFLU0NsdXN0ZXIKa2luZDogQ29uZmlnCnByZWZlcmVuY2VzOiB7fQp1c2VyczoKLSBuYW1lOiBjbHVzdGVyQWRtaW5fd3Vka3ViZVJlc291cmNlR3JvdXBfbXlBS1NDbHVzdGVyCiAgdXNlcjoKICAgIGNsaWVudC1jZXJ0aWZpY2F0ZS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VVNWFrTkRRWFEyWjBGM1NVSkJaMGxSU1RoeVVuQlRSVzh6UTJkT1dtTlRVeXR4VUhaVFZFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkVRVTRLVFZGemQwTlJXVVJXVVZGRVJYZEthbGxVUVdWR2R6QjRUMFJCZWsxRVozbE5lbFY1VGtSR1lVWjNNSGxOUkVGNlRVUmplVTE2VlhsT1JFWmhUVU52ZUFwR2VrRldRbWRPVmtKQmIxUkViazQxWXpOU2JHSlVjSFJaV0U0d1dsaEtlazFST0hkRVVWbEVWbEZSUkVWM1dtcGlSMnhzWW01UmQyZG5TV2xOUVRCSENrTlRjVWRUU1dJelJGRkZRa0ZSVlVGQk5FbERSSGRCZDJkblNVdEJiMGxEUVZGRVlUQndiVEUzVm5JeWVqZzBWWFU1T0ZGNGQyaEZkR05NVFVSTGFIb0taRlk0T1VwMFJFTktVMW8zVEhRNU5qZHdPRTlIV2xFd1VuVkVXRkJVU0VoRmFqTnVXVlZsV0cxTlMyWlhZWEZwVldKTk0wUTJiWE0zWTJKMWMwZDRTd280U1dwUVYwTkdkR0l4VlN0cWJEUjFWMU5QUTNCakt6TnVVMGQ0UlUxRUswYzFTbGxwWjFCbU0xcEJhWEZHZGxWV2NYZEZjMVJSV0ZGeFVIRmhSRTlqQ2tSelYwRk9kVzB3UkhWcmFIRXJkSGhwWWsxa05YTjJZV1JvV2tJd1VTdHhTMlZoVDFwT2JYUlpSMVJzU1RadGIzQkVXVWRPVW1oVWIwMVZNSFZqVlVNS1MyWkVOMXB1UlV0VGRHaDVaVUZrUkVZMlpXRmFRbWQ2ZDBzdlRHVTFiSFJQVkVOaFdXRlZia2RxTVZaemVYTk5Xako2Vm1kT0wzcEViMnhPUlVKcVRBbzBlbXRhYXpKNmJrTTBkMlI0UTNGdU5qRmFTWHAxZW5VMFZERXhSMFIzWVc5c1UwWkJOMkZxU1ZveFRIQXdOMDlpWkZFdlRFSkpUMUpLWjI4MmVURktDalJWZUVsdWR6bDBXbkV3VTB4TU1sWlRaVlZEYUV4SFprcHljVzVSVUZaRlIyNDFkM3BGV2xWdWIwVllPSGR3YURsa01IRnBVM1ZoYTNKR1NVVnpkM2dLYUZGd05rVlJTRlYzVUZCV1VrcFlZM1ZLYVhOMEwzRjZWazFMTms1b2MwRjFRVFpFZG5aNVJ6ZHpURTR2YWxCRlprVnhWekl2U2tsQlFYcHFZbTUwUVFwV1pFTldTbmRrZGtkakwzQk9RVTlrT1RrMFVETkhVRmRrUkdGR1ZsUm9kbnByYVVScldYcEZPUzlCVUN0eFNYWklkVkp5WVZWMWIwMTFLeTh4WXpWSENuTnZORlJqVHpKWmFsTTRORlpXZVU5bk1IcHJlRkZDTlhwWlpWbE9jRGxxTDFWVlEwbDJVVkJMYUhob01EWXhVamhPYmpWSGRGVm9LelpvVmtoMFYxY0tiMDlzTUVSWlozaExNRFJyZVROVVRFbFFOVGxYU0ZvMlpFTlZkbmxXTVhveFlVdDNNWE5HYWprNU1FcFVjbEJvYVRWQlRXRnFUbFJUVDFoQmR6aEJSZ295Tml0RlNFWmxhemQxV25JemQwbEVRVkZCUW05NlZYZE5la0ZQUW1kT1ZraFJPRUpCWmpoRlFrRk5RMEpoUVhkRmQxbEVWbEl3YkVKQmQzZERaMWxKQ2t0M1dVSkNVVlZJUVhkSmQwUkJXVVJXVWpCVVFWRklMMEpCU1hkQlJFRk9RbWRyY1docmFVYzVkekJDUVZGelJrRkJUME5CWjBWQmIzRmhNbkp4U2s4S2JuaFJabEl4V1dobVkydEVkRGR0VWtGak4wNUxOazByVTFOU1JFeFJkV2x4TkhaU1NFVjRjMDVIY21WMk5tOUJORTF6UmpWTVNVcEtSalV4WWtZNVR3cHJRM0pPVjA1WVIzVjJTek4yWmt3ek1uTmphalYyZEVkUFZrcEtjMWt3YkdZd2VVZFRMMGRsYlhoUU1FTnZNbkV2Y1U5alJUSnBkMFpOWW5aWE16WjBDbmR6VERSaVNHMDJjakIwUW1WMVMzVnRhSFZuUVRNclpuTlFSMkZvZDAxU1RFRmtaSFZoSzBGTldub3dOVzlxWW5wRVpuVXpTMGhMTkdKdFJUbFlWbElLZDI1NFNrNXlTV3MzU2pNclVreHhhMkpCU0hWRVNuZHFXakU0Tm1rM0x6WmxPVFJWUjFBNGVIQkZXSHBGTVdGQlp6WjNXREZ1VEdock0weHdVSE13WmdwUFIzZEljWE50ZGxoaVEyUjFXRFZqTDJkNWJqZG5UelZ3Tkd4RFYxQk5SalpUZWt0RU16Z3ZTV1J4Y0M5SlUwbHlVQ3RMVFdFNVpXNDRVVmhDTUdGUUNrVnljR0phTmxSU05tVlZNV2xOTVVwUFVua3pOV0ptUldGRVJrdGhjRnBxY1drM1JXTjBRV0p1U1dwVlUzVk9XWEl6YTJGSlkyWnJiMjVxTm5KV05HY0tTRFp1YkhoNlJUQTRUemx3Y0RWbmJtcGpZMloyWVVJcmExZHdlSGx3WkZCTFQxTnViV1ZzY1Zsa1kyeHRWVkJOTVdaTE4zTmxPSEZLU2xoNk1VSnRVd3BxVFVkWlZIWklURkl3UTI5UFVTdG1SVFJ4YlhkNFYzcGliMFZDU1N0eFNubFZhbnAxZEdOTlRFZGlXRmMyVkhWNlRuZGFVbWxwVDI5Wk1XOHlVR3hGQ2xOME4xaElVSGRvVUhCUk9GUkhhWGcxTlROdFQzbzNNazgzYkZweVRTdG9OV3g0U20weFNIVlNVRkZyUTFKSVkxQjZZMHg0V0V4eFZrNDJlbU52UmtRS1RqZ3JlVWx3WVdkcFNrSXdlREZZU1ZFMWRsazNiWFZqTnpjd2NFcDNkV2cxT1doS1pEWk9hbVJGWXk5TFYxRkJPREFyVEVsRWFWRm9hRFpYY0dabVR3cDNjMDgyTmsxaUwwVk5aRGxJWTFFeVQydzNOMWMwTm5CNlVVcERVRGx0YjNkb2F6MEtMUzB0TFMxRlRrUWdRMFZTVkVsR1NVTkJWRVV0TFMwdExRbz0KICAgIGNsaWVudC1rZXktZGF0YTogTFMwdExTMUNSVWRKVGlCU1UwRWdVRkpKVmtGVVJTQkxSVmt0TFMwdExRcE5TVWxLU25kSlFrRkJTME5CWjBWQk1uUkxXblJsTVdFNWN5OVBSa3gyWmtWTlkwbFNURmhEZWtGNWIyTXpWbVpRVTJKUmQybFZiV1Y1TjJabGRUWm1Da1JvYlZWT1JXSm5NWG93ZUhoNFNUazFNa1pJYkRWcVEyNHhiWEZ2YkVkNlRuY3JjSEpQTTBjM2NrSnpVM1pEU1hveFoyaGlWemxXVUc4MVpVeHNhMm9LWjNGWVVIUTFNR2h6VWtSQkwyaDFVMWRKYjBRek9USlJTWEZvWWpGR1lYTkNURVV3UmpCTGFqWnRaM3B1UVRkR1owUmljSFJCTjNCSllYWnlZMWx0ZWdwSVpXSk1NbTVaVjFGa1JWQnhhVzV0YW0xVVduSlhRbXMxVTA5d2NVdFJNa0pxVlZsVk5rUkdUa3h1UmtGcGJuY3JNbHA0UTJ0eVdXTnVaMGhSZUdWdUNtMXRVVmxOT0VOMmVUTjFXbUpVYTNkdGJVZHNTbmh2T1ZaaVRYSkVSMlJ6TVZsRVpqaDNOa3BVVWtGWmVTdE5OVWRhVG5NMWQzVk5TR05SY1hBcmRGY0tVMDAzY3pkMVJUbGtVbWM0UjNGS1ZXaFJUekp2ZVVka1V6WmtUM3B0TTFWUWVYZFRSR3RUV1V0UGMzUlRaVVpOVTBvNFVHSlhZWFJGYVhrNWJGVnViQXBCYjFONGJubGhObkF3UkRGU1FuQXJZMDE0UjFaS05rSkdMMDFMV1daWVpFdHZhM0p0Y0V0NFUwSk1UVTFaVlV0bGFFVkNNVTFFZWpGVlUxWXpUR2xaQ25KTVpqWnpNVlJEZFdwWllrRk1aMDluTnpjNGFIVTNRM3BtTkhwNFNIaExiSFIyZVZOQlFVMDBNalUzVVVaWVVXeFRZMGhpZUc1UU5sUlJSRzVtWm1VS1JEbDRhakZ1VVRKb1ZsVTBZamcxU1djMVIwMTRVR1ozUkM5eGFVeDROMnRoTW14TWNVUk1kblk1V0U5U2NrdFBSVE5FZEcxSk1IWlBSbFpqYW05T1RRbzFUVlZCWldNeVNHMUVZV1paTHpGR1FXbE1NRVI1YjJOWlpFOTBWV1pFV2l0U2NsWkpablZ2VmxJM1ZteHhSSEJrUVRKSlRWTjBUMHBOZERCNWVVUXJDbVpXYURKbGJsRnNURGhzWkdNNVYybHpUbUpDV1M5bVpFTlZObm8wV1hWUlJFZHZlbFV3YW14M1RWQkJRbVIxZG1oQ2VGaHdUemR0WVRrNFEwRjNSVUVLUVZGTFEwRm5RV2syYTBkbFpIRXplQzlpZUdKTlNreHhTVmRtWmxaelZYSlBPRmhTUkcxU1VUVktWMmQwVERkTlNIWkhTSE4yVm5ORldXSkdVa296ZUFwdGFFVk5UelIyYmtaSE1sRTRZek13UlZOSFdqTnpSbWwzY25kSVNFeFhSMDVzTlVKSmRHOW9aekpXY1VOaU5tNVRXalJpWkZKMWJXRkJRMXAzY0dWNUNtOW5TelZUVUhKNk5UWnRkMjFpUXpZMWRsRnZSVWRDU1VzeVNYUmFMMDk0Ym10cVJqSk9SMGx2VEhCMloxbFhVRmQwWjNCbFNtYzROa04xVlhkM2VsRUtSMkZUVUU5VWNGSmtRMUZNWkhaelExZE5kR3RZYW1SRmFrVndRMXBpSzNod2QyRmFWSE51YkhkNlZ6aE9OamhNY2t3d2VqVnNNVmN4UTNaTllta3haUXB2VnpCamMxZG9aelppTW5CWVNsWXlla042VGxGT09YSjJZa1lyU0dNMmIyNXBNMjF6YlROVk9TdEpSR2cyVFcxNVRITndjV1pLVG10aU4yRmhkRkZqQ21vck5XWk1Xa2RuTWpkUVZHMWlValJqYzNsMlVWaFZRbFV5TTFwNk1sWjRkVm96V0dKVE1VMXRXamcxYmxRelYybHZaRU5UYmpCU2RVMXFiWHBWYjBVS1EyWklabE5hYWt4RVR6a3lZWFpGVWxCek1VbGFaMmMzY1dwWGNuZFVZaXQ2Y1VvNVRuSkdZeTl0YkZnMWVGWk5Oblo2SzJsbGJXTk9ORmx3YlVwWWVBbzFlR3h0TTFoR1RXVm9aVTVPTkhCcVJYUlhZMmRRV1drMWNVSkJLMkZqUmxsaVpYWXdhMFpVU21GdWFubEthRTk0VGxWYVF6ZENNazlFYUM5b2NGSmlDbTFIUjNsNVEyUllUbFpvYUdsSFJtMTRLMHhHYm5weWNsTXJlVmhYUm5oSVR6UkdNMEo2UzFSbGFtNVRiQzlzSzFoc2RVSmFSRXRsVTJ0TFNHUjJTbGdLYjJGV2FqTk5XRmhxYTJSTE5rVmhNalpCYlRBd2RHOUlSR2wzVVRnMFlXdEdabU5VTkdwVVRWa3JkemhJTlU5a1ZqWkllVU42Y1ZKc1YzVm9TRTlPVXdwQk5FNWlNMjV1UVZWeGVVZFNWM1k1VG13NFZXRjFhalJOUkRKS1MyUndRaTlQUzIxWFEwbEJWVkZxT0d4MmRVNDBVVXREUVZGRlFUVmhVMHBwTlhKUkNsRmpTSFpvWkZwT2JFVjNXbmRTSzJOMlRuVnVkbkp4U1dkdEsxTkpVbkIzZHpOc1ZYQnBiMHN3Y201blVIbFNkbGRyTDNkd05reFVPWEJVWlhoU2JWZ0tkSGg0YUVKYVkxZDFhRlJ6YWsxcWFsWmpPVXRIZG1OTGREZEtMekoxY1UxSFZUVlVkekp2UTJOVU1XSm1Xbmg0YkhOWk5pdEtibEZMV0ZORVVqWnljQXBLTDFGSVptVmhVWGczTVdKMFRTdDVORTVTVVhCMGVXSnBiV042TXpZeVlXVlFjRWRDYWxwUU9GVXlLMUkwVmpjMmRERXdTbkl6VlZSbWVXWnRaWHAyQ2pOTFRVNDRPRzlHWmpkdlNtWnBZMUIwTXk5WGJYVjBjMDVtZWpKd05tNWtZelJwYUhsQmFrSm5jWE5HTUZnNWRDdHRRbTl4Umxab1YxbzFiRVV2UkhNS2RXazVZWG95Um5KR2ExaDZhelExY2pSTlp5c3ZhMkkzYUhkeVRubFRiRU5oZG5wR2VGRkxjblZUVjB0WWMxSldXbTkzYkZOa2NFcHFLMWxTYjNac1lncG1iMDR2VVZnNFREUmFaeTlGVVV0RFFWRkZRVGd2UVd0eVFXMW1kemRUTUhVNE5tZEZWVXRNY1c1aldsbDFkVWxDUzFZd1NqaE5TVlJDWjNoMWJIcGlDamw2TW5OQ00yNWhUbXhKTlVsV2JUVnVVRkpIUkRsRE0wSkNUazlLZVhsdWNsaHNjMWg0TjJGdVFtTlJNMXB5ZHpoYWVYZEVPVE13ZDFWeUsyVnJWVTBLYUdwMWVrZGhkMUZTZWpGSFJHVjBOa3A0VkZBd00xbDVPRkJSV1V0dWNrUXZRbWRyV21ZNU5VVXpNR1YzUTFKUWNtcFFOWGx3YkdoMmRITTFkMm8xTXdwT1NXMVVjbkZhZWpKQmNITnpiMGxyWkUxVFNsZ3JNbFZKYUhacGJUSnljbFZ6UlhkWFYzVTFhbWR0YmpGWWFVbDRUelJ2ZDFOUVRIWlhXUzkzYTFWeUNsZGlUR3MwY0V3NUt6TlVXRXBVZWxWSloyRTVTa2ROUTJkMFMxcHhZekJQYXpKa05TdFpWMFJsUW5SdlFYTlpSM1Y2VFVsVk5XaHFNVEJzYVdGR1ZIRUtUVGR4U1RWck9FeEpaRGRKWTFOeE1FRlRVVnBvZVhSUlVXOVZabkZMVDFwUmJFbGlaSFJFWWpkM1MwTkJVVUpNV1dOVFNUUkRkbTExWjNWMlUyeGhlZ3BFU0hkVWVXaFlRVnBRV21Wb1NYSldSR3g2VVc5M1dreEdSMUF5UnpaNmNqSlljRVZJSzJsNGJ6ZFphWGRUSzBaTVVEaHVaMmwzYzFCd1QxZHhlVGhhQ25KRk5uVk9Remw2T1hCVGFqTXhOVlZUVEV4NGIweGhWMmhCUXpWRUt6VXpWRFpZWkhsUFNEaHNWblU0VTFoc2MyTnJUelV6WkN0c1luUlRZWFp1Ym1VS1NqQnRXVkVyYlRkS1pHSklkak5yVEdGTE9EbHBTbHBDYVdnME9GbGpNME5NZW5ZM04wWlNkVVl6TTA5VVpHZEpUbHB2UzJoQ01rVjBjakpaZG10TmNBb3hNVGRSVnpOQmMxVjZiVmRLZUhWb1lWVldjV0ZxWXpSbGNYaHZjRzQ0Ymt4dk5qbFpNMEYwYkZWSmJIQTRiRXREZEZkNFVYY3ZhVmRxVFdORGFWZEdDamRVV2pCNFNHRnFSbVpwWm5KYWRGcHBMMFppVkVWRWVVdzRSMWd4ZWxkYWJFUnZhM1UxZDNoRGJWbG1TbEp0Y1hNclNYTk9iVU5VVjJkVlJ6aG1XbklLWlc1bFVrRnZTVUpCUmt3MlZFTTRkRTExYUhGcWRGRllla1ZGZVhoeWJXTjFPR296V0RWU1pFSTJPRU15T0RaMWNVUlFRbkJLTVhOdlFtdEhOMU5DZGdwU1ltMHZaMHhGVVUxemFuTmpWMVF3WjBSQk5VMHllVU5GYTJkc1FXRXpORGx4WVRkTWRIbDRUbEEyWjNaTlNVaHNXbkpZTlVKUVFrOVJTWGhyYmxBMUNrNTBlRVJVY0VRcmRHeGpla3hOTjJvMlZtbENNME55YW5ReldIVjFhWFpVT0hWTVprNTVLMFo0UzBkVVNGUnVSRGQwYWxKVlRrWlNVSGxuTkhaTk1IWUtaSEIzWlZGMlNuQmlSMVo1VG0xTFNEUTRVMFZWVkc5alRubHphbmh6UnpOTVVqQnFXRVJ5U1ROS2IyVmhRVFp6VDIxSlIwUXlTRFo0V0hOQ1JERTBOZ281TTJoWFVXSTJNVlpvSzB4bmJUUnVNekZrZDFKc1dVUTJLM3BvTm5JcmRtRjFhMDl1V0cxUFQxaFlaVXcxUVhKRFZYUXJTSGhEY210cFpuUnRWbUpVQ2twd1NFRlBaWHAwWWpkWFdVZFVkMWhrY0ZwNE1rRTVSVk5OTVZrM1NXTkRaMmRGUVVGcmMwWndMMkpWYTJKVmJtMVBabFJpZUdOd1owdFNPRUpISzA4S1MxSnJiMWRzTHpWTFRGTXdVVTFLU1RsbllrSjFXbXRrUlc1SVJsWkpNVGx5V2pZcllrRklVRVJyTkZkVWFIRjBRVXR1WVRFd1NUWmxja2d3UkVaWU1RcFlVMHhPV0dkTUszcE9lSEZLWmsxbGFrWnpPV1Y2V1Zsd1JFTTRkWEJKV0hsWk9HRlVNa0pTYmpGd05FVnVaRXhzTUZoM01rNXJNbHBKZEV0NU9HOXFDbWd4THpsUk1VVjFjRkkzWTBseE5uSkpVbFpDUlRsNE1uQnRMMWN5Um1SaFpHUXZhazlPYzNoNk5rOW1WM3BUYzNwcVZTOURlRE5pVTJGdVVVOXRNRk1LZGs1TVpWQjJNRGRYY0ZOU1JVOWtNbGsyUTFSUFRrbGxaRlIzVjAxdFQwOVBRVkJvVm1keVpYcDJSV1IxZGpWcFFXOWFhbE5LVG1RemRYbERTRk0wTWdwM2IyVnVhamhvZG5wQ2EydzFMMWN6U1VoMU5tcGpaSFZyT0RJNFZqZG1WVUZ3YURKWk5WVkRXRGxZZDFOMFdGcDZhR1JRZUVGQmRXRm5QVDBLTFMwdExTMUZUa1FnVWxOQklGQlNTVlpCVkVVZ1MwVlpMUzB0TFMwSwogICAgdG9rZW46IDU4M2VjYWNlZTk2MmUxMWU5ZGFkMTgxNDY3NjJhMjQ1Cg=="
+	inlineconfig := result.Config
+	decoded, _ := base64.StdEncoding.DecodeString(inlineconfig)
+	resourceSpec, _ := json.Marshal(resource.Properties.Settings)
+
+	params := mux.Vars(req)
+	configFile := getKubernetesTemplateInJson(decoded, resource, params["resource"], resourceSpec)
+	fmt.Printf("%s", configFile)
+
+	responseBody, _ := json.Marshal(resource)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+
+	provider := testAccProviders["kubernetes"]
+
+	cfg, err := config.Load(configFile)
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
+
+	for _, v := range cfg.ProviderConfigs {
+		provider.Configure(terraform.NewResourceConfig(v.RawConfig))
+	}
+
+	info := &terraform.InstanceInfo{
+		Type: resource.Properties.ResourceName,
+	}
+
+	for _, v := range cfg.Resources {
+		state := new(terraform.InstanceState)
+		state.Init()
+		diff, err := provider.Diff(info, state, terraform.NewResourceConfig(v.RawConfig))
+		if err != nil {
+			fmt.Printf("%s", err)
+		}
+		newState := new(terraform.InstanceState)
+		newState.Init()
+
+		provider.Apply(info, newState, diff)
+	}
+}
+
+func main() {
+	router := mux.NewRouter()
+	router.NotFoundHandler = http.HandlerFunc(NotFound)
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.ExternalShim/externalProvider/{provider}/resource/{resource}/{name}", GetPersonEndpoint).Methods("GET")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.ExternalShim/externalProvider/{provider}/resource/{resource}/{name}", PutResources).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/externalProvider/{monitorName}", PutMonitorDepolyment).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/deployments/{deploymentName}", PutDeployment).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/terraform/datadog/timeboard/{timeboardName}", PutTimeboardDepolyment).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/terraform/kubernetes/{kubernetes}", PutKubernetesDepolyment).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/terraform/kubernetes/pod/{pod}", PutKubernetesPodNew).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/terraform/{terraform}/kubernetes/{kubernetes}/pod/{pod}", PutKubernetesPodNew).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/terraform/kubernetes/service/{service}", PutKubernetesService).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/terraform/{terraform}/kubernetes/{kubernetes}/service/{service}", PutKubernetesService).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/rpforrp/{rpforrp}/dockerimages/{dockerimages}", PutDockerImage).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/provider/{provider}", putProvider).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}", putResource).Methods("PUT")
+	log.Fatal(http.ListenAndServeTLS(":443", "fullchain.pem", "privkey.pem", router))
+	//log.Fatal(http.ListenAndServe(":8080", router))
+}
