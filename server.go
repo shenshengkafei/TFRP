@@ -870,6 +870,14 @@ type Package struct {
 	Config       string
 }
 
+type ResourcePackage struct {
+	Id           bson.ObjectId `bson:"_id,omitempty"`
+	ResourceID   string
+	StateID      string
+	Config       string
+	ResourceType string
+}
+
 type Provider struct {
 	Location   string
 	Properties PoviderProperties
@@ -914,7 +922,7 @@ func getKubernetesTemplateInJson(configFile []byte, resource Resource, resourceI
 
 func putProvider(w http.ResponseWriter, req *http.Request) {
 	params := mux.Vars(req)
-	fullyQualifiedResourceID := "/subscriptions/" + params["subscriptionId"] + "/resourcegroups/" + params["resourceGroup"] + "/providers/Microsoft.Terraform-OSS/provider/" + params["provider"]
+	fullyQualifiedResourceID := "/subscriptions/" + params["subscriptionId"] + "/resourceGroups/" + params["resourceGroup"] + "/providers/Microsoft.Terraform-OSS/provider/" + params["provider"]
 
 	provider := Provider{}
 	defer req.Body.Close()
@@ -1066,8 +1074,179 @@ func putResource(w http.ResponseWriter, req *http.Request) {
 		newState := new(terraform.InstanceState)
 		newState.Init()
 
-		provider.Apply(info, newState, diff)
+		resultState, _ := provider.Apply(info, newState, diff)
+		fmt.Printf("%s", resultState.ID)
+
+		// Storage operation
+		// get collection
+		collection := session.DB(database).C("resource")
+
+		fullyQualifiedResourceID := "/subscriptions/" + params["subscriptionId"] + "/resourceGroups/" + params["resourceGroup"] + "/providers/Microsoft.Terraform-OSS/resource/" + params["resource"]
+
+		// insert Document in collection
+		err = collection.Insert(&ResourcePackage{
+			ResourceID:   fullyQualifiedResourceID,
+			StateID:      resultState.ID,
+			Config:       configFile,
+			ResourceType: resource.Properties.ResourceName,
+		})
+
+		if err != nil {
+			log.Fatal("Problem inserting data: ", err)
+			return
+		}
 	}
+}
+
+func deleteResource(w http.ResponseWriter, req *http.Request) {
+	params := mux.Vars(req)
+	fullyQualifiedResourceID := "/subscriptions/" + params["subscriptionId"] + "/resourceGroups/" + params["resourceGroup"] + "/providers/Microsoft.Terraform-OSS/resource/" + params["resource"]
+
+	database := "tfrp001"
+	password := "TXWxRsEbZBrBUCJaq3Zu2NqdfafLJcdbKu8rJ6dwKBnjRzfSIwJ8vh23gxRof7GNhOgfeZjfqKL1M7fMWiWQEw=="
+
+	// DialInfo holds options for establishing a session with a MongoDB cluster.
+	dialInfo := &mgo.DialInfo{
+		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", database)}, // Get HOST + PORT
+		Timeout:  60 * time.Second,
+		Database: database, // It can be anything
+		Username: database, // Username
+		Password: password, // PASSWORD
+		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
+			return tls.Dial("tcp", addr.String(), &tls.Config{})
+		},
+	}
+
+	// Create a session which maintains a pool of socket connections
+	// to our MongoDB.
+	session, err := mgo.DialWithInfo(dialInfo)
+
+	if err != nil {
+		fmt.Printf("Can't connect to mongo, go error %v\n", err)
+		os.Exit(1)
+	}
+
+	defer session.Close()
+
+	// SetSafe changes the session safety mode.
+	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
+	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
+	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
+	session.SetSafe(&mgo.Safe{})
+
+	// get collection
+	collection := session.DB(database).C("resource")
+
+	// Get Document from collection
+	result := ResourcePackage{}
+	err = collection.Find(bson.M{"resourceid": fullyQualifiedResourceID}).One(&result)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	fmt.Printf("%s", result.Config)
+
+	provider := testAccProviders["kubernetes"]
+
+	cfg, err := config.Load(result.Config)
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
+
+	for _, v := range cfg.ProviderConfigs {
+		provider.Configure(terraform.NewResourceConfig(v.RawConfig))
+	}
+
+	info := &terraform.InstanceInfo{
+		Type: result.ResourceType,
+	}
+
+	state := new(terraform.InstanceState)
+	state.ID = result.StateID
+
+	diff := new(terraform.InstanceDiff)
+	diff.Destroy = true
+
+	provider.Apply(info, state, diff)
+
+	responseBody, _ := json.Marshal(result)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
+}
+
+func getResource(w http.ResponseWriter, req *http.Request) {
+	params := mux.Vars(req)
+	fullyQualifiedResourceID := "/subscriptions/" + params["subscriptionId"] + "/resourceGroups/" + params["resourceGroup"] + "/providers/Microsoft.Terraform-OSS/resource/" + params["resource"]
+
+	database := "tfrp001"
+	password := "TXWxRsEbZBrBUCJaq3Zu2NqdfafLJcdbKu8rJ6dwKBnjRzfSIwJ8vh23gxRof7GNhOgfeZjfqKL1M7fMWiWQEw=="
+
+	// DialInfo holds options for establishing a session with a MongoDB cluster.
+	dialInfo := &mgo.DialInfo{
+		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", database)}, // Get HOST + PORT
+		Timeout:  60 * time.Second,
+		Database: database, // It can be anything
+		Username: database, // Username
+		Password: password, // PASSWORD
+		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
+			return tls.Dial("tcp", addr.String(), &tls.Config{})
+		},
+	}
+
+	// Create a session which maintains a pool of socket connections
+	// to our MongoDB.
+	session, err := mgo.DialWithInfo(dialInfo)
+
+	if err != nil {
+		fmt.Printf("Can't connect to mongo, go error %v\n", err)
+		os.Exit(1)
+	}
+
+	defer session.Close()
+
+	// SetSafe changes the session safety mode.
+	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
+	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
+	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
+	session.SetSafe(&mgo.Safe{})
+
+	// get collection
+	collection := session.DB(database).C("resource")
+
+	// Get Document from collection
+	result := ResourcePackage{}
+	err = collection.Find(bson.M{"resourceid": fullyQualifiedResourceID}).One(&result)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	fmt.Printf("%s", result.Config)
+
+	provider := testAccProviders["kubernetes"]
+
+	cfg, err := config.Load(result.Config)
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
+
+	for _, v := range cfg.ProviderConfigs {
+		provider.Configure(terraform.NewResourceConfig(v.RawConfig))
+	}
+
+	info := &terraform.InstanceInfo{
+		Type: result.ResourceType,
+	}
+
+	state := new(terraform.InstanceState)
+	state.Init()
+	state.ID = result.StateID
+
+	resultState, _ := provider.Refresh(info, state)
+	responseBody, _ := json.Marshal(resultState)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
 }
 
 func main() {
@@ -1085,7 +1264,9 @@ func main() {
 	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/terraform/{terraform}/kubernetes/{kubernetes}/service/{service}", PutKubernetesService).Methods("PUT")
 	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ExternalShim/rpforrp/{rpforrp}/dockerimages/{dockerimages}", PutDockerImage).Methods("PUT")
 	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/provider/{provider}", putProvider).Methods("PUT")
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}", getResource).Methods("GET")
 	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}", putResource).Methods("PUT")
-	log.Fatal(http.ListenAndServeTLS(":443", "fullchain.pem", "privkey.pem", router))
-	//log.Fatal(http.ListenAndServe(":8080", router))
+	router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}", deleteResource).Methods("DELETE")
+	//log.Fatal(http.ListenAndServeTLS(":443", "fullchain.pem", "privkey.pem", router))
+	log.Fatal(http.ListenAndServe(":8080", router))
 }
