@@ -56,13 +56,22 @@ func initRoutes() {
 		Consumes(restful.MIME_JSON).
 		Produces(restful.MIME_JSON)
 
+	addProvidersOperationRoutes(webService)
 	addResourcesOperationRoutes(webService)
 
 	restful.Add(webService)
 }
 
 func addProvidersOperationRoutes(webService *restful.WebService) {
-
+	webService.Route(webService.
+		PUT(consts.ProviderRegistrationOperationRoute).
+		To(putProviderRegistrationController).
+		Doc("Create/update a provider registration").
+		Operation(consts.PutProviderRegistrationControllerName).
+		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
+		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
+		Param(webService.PathParameter(consts.PathProviderRegistrationParameter, "Name of provider registration").DataType("string")).
+		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
 }
 
 func addResourcesOperationRoutes(webService *restful.WebService) {
@@ -79,7 +88,7 @@ func addResourcesOperationRoutes(webService *restful.WebService) {
 	webService.Route(webService.
 		PUT(consts.ResourceOperationRoute).
 		To(putResourceController).
-		Doc("Create/update a  resource").
+		Doc("Create/update a resource").
 		Operation(consts.PutResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
 		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
@@ -89,7 +98,7 @@ func addResourcesOperationRoutes(webService *restful.WebService) {
 	webService.Route(webService.
 		DELETE(consts.ResourceOperationRoute).
 		To(deleteResourceController).
-		Doc("Delete a  resource").
+		Doc("Delete a resource").
 		Operation(consts.DeleteResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
 		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
@@ -480,6 +489,63 @@ func getResource(w http.ResponseWriter, req *http.Request) {
 	responseBody, _ := json.Marshal(resultState)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseBody)
+}
+
+func putProviderRegistrationController(request *restful.Request, response *restful.Response) {
+	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
+
+	provider := Provider{}
+	rawBody, err := ioutil.ReadAll(request.Request.Body)
+	fmt.Printf("%s", string(rawBody))
+	err = json.Unmarshal(rawBody, &provider)
+	if err != nil {
+		fmt.Printf("Can't connect to mongo, go error %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create a session which maintains a pool of socket connections
+	// to our MongoDB.
+	session, err := mgo.DialWithInfo(dialInfo)
+
+	if err != nil {
+		fmt.Printf("Can't connect to mongo, go error %v\n", err)
+		os.Exit(1)
+	}
+
+	defer session.Close()
+
+	// SetSafe changes the session safety mode.
+	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
+	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
+	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
+	session.SetSafe(&mgo.Safe{})
+
+	// get collection
+	collection := session.DB(database).C("provider")
+
+	// insert Document in collection
+	err = collection.Insert(&Package{
+		ResourceId:   fullyQualifiedResourceID,
+		ProviderName: provider.Properties.ProviderName,
+		Config:       provider.Properties.Settings.Config,
+	})
+
+	if err != nil {
+		log.Fatal("Problem inserting data: ", err)
+		return
+	}
+
+	// Get Document from collection
+	result := Package{}
+	err = collection.Find(bson.M{"resourceid": fullyQualifiedResourceID}).One(&result)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	responseBody, _ := json.Marshal(provider)
+	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+	response.Write(responseBody)
 }
 
 // Get resources

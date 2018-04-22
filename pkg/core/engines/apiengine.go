@@ -18,10 +18,12 @@ const (
 	Subscriptions = "subscriptions"
 	// ResourceGroups contains a group of ARM (RP) resources
 	ResourceGroups = "resourceGroups"
-	// Resource is the name of resource
-	Resource = "resource"
+	// Resources is the name of resource
+	Resources = "resources"
 	// Providers is the name of provider
 	Providers = "providers"
+	// ProviderRegistrations is the name of provider registration
+	ProviderRegistrations = "providerregistrations"
 )
 
 // GetSubscriptionID returns the subscription id if it was on the request else empty string
@@ -44,11 +46,25 @@ func GetResourceName(request *restful.Request) string {
 	return request.PathParameter(consts.PathResourceNameParameter)
 }
 
+// GetProviderRegistrationName returns the provider registration name if it was on the request else empty string
+func GetProviderRegistrationName(request *restful.Request) string {
+	return request.PathParameter(consts.PathProviderRegistrationParameter)
+}
+
 // GetFullyQualifiedResourceID returns the fully qualified resource id
-// "/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}"
+// /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resources/{resource}
 func GetFullyQualifiedResourceID(request *restful.Request) string {
 	return "/" + Subscriptions + "/" + GetSubscriptionID(request) +
 		"/" + ResourceGroups + "/" + GetResourceGroupName(request) +
 		"/" + Providers + "/" + consts.TerraformRPNamespace +
-		"/" + Resource + "/" + GetResourceName(request)
+		"/" + Resources + "/" + GetResourceName(request)
+}
+
+// GetFullyQualifiedProviderRegistrationID returns the fully qualified id of provider registration
+// /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/providerregistrations/{providerRegistration}
+func GetFullyQualifiedProviderRegistrationID(request *restful.Request) string {
+	return "/" + Subscriptions + "/" + GetSubscriptionID(request) +
+		"/" + ResourceGroups + "/" + GetResourceGroupName(request) +
+		"/" + Providers + "/" + consts.TerraformRPNamespace +
+		"/" + ProviderRegistrations + "/" + GetProviderRegistrationName(request)
 }

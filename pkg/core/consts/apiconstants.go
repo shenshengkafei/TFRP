@@ -6,30 +6,31 @@ package consts
 
 // Case insensitive literals
 const (
-	SubscriptionsLiteral     = "{sb:(?i)subscriptions}"
-	ResourceGroupsLiteral    = "{rg:(?i)resourcegroups}"
-	ProvidersLiteral         = "{pv:(?i)providers}"
-	ResourcesLiteral         = "{rs:(?i)resources}"
-	ContainerServicesLiteral = "{cs:(?i)containerservices}"
-	LocationsLiteral         = "{lc:(?i)locations}"
-	OperationResultsLiteral  = "{or:(?i)operationresults}"
-	OperationsLiteral        = "{op:(?i)operations}"
-	DeploymentsLiteral       = "{dp:(?i)deployments}"
-	PreflightLiteral         = "{pf:(?i)preflight}"
-	InternalLiteral          = "{in:(?i)internal}"
-	ManagedClustersLiteral   = "{mc:(?i)managedclusters}"
-	OrchestratorsLiteral     = "{or:(?i)orchestrators}"
-	UpgradeProfilesLiteral   = "{us:(?i)upgradeprofiles}"
-	AccessProfilesLiteral    = "{ap:(?i)accessprofiles}"
-	AdminLiteral             = "{ad:(?i)admin}"
-	PodsLiteral              = "{po:(?i)pods}"
-	LogLiteral               = "{lo:(?i)log}"
-	EventLiteral             = "{ev:(?i)events}"
-	KubectlLiteral           = "{ku:(?i)kubectl}"
-	ContainersLiteral        = "{co:(?i)containers}"
-	UnderlaysLiteral         = "{un:(?i)underlays}"
-	DefaultLiteral           = "{up:(?i)default}"
-	ListCredentialLiteral    = "{li:(?i)listcredential}"
+	SubscriptionsLiteral         = "{sb:(?i)subscriptions}"
+	ResourceGroupsLiteral        = "{rg:(?i)resourcegroups}"
+	ResourcesLiteral             = "{rs:(?i)resources}"
+	ProvidersLiteral             = "{pv:(?i)providers}"
+	ProviderRegistrationsLiteral = "{pr:(?i)providerregistrations}"
+	ContainerServicesLiteral     = "{cs:(?i)containerservices}"
+	LocationsLiteral             = "{lc:(?i)locations}"
+	OperationResultsLiteral      = "{or:(?i)operationresults}"
+	OperationsLiteral            = "{op:(?i)operations}"
+	DeploymentsLiteral           = "{dp:(?i)deployments}"
+	PreflightLiteral             = "{pf:(?i)preflight}"
+	InternalLiteral              = "{in:(?i)internal}"
+	ManagedClustersLiteral       = "{mc:(?i)managedclusters}"
+	OrchestratorsLiteral         = "{or:(?i)orchestrators}"
+	UpgradeProfilesLiteral       = "{us:(?i)upgradeprofiles}"
+	AccessProfilesLiteral        = "{ap:(?i)accessprofiles}"
+	AdminLiteral                 = "{ad:(?i)admin}"
+	PodsLiteral                  = "{po:(?i)pods}"
+	LogLiteral                   = "{lo:(?i)log}"
+	EventLiteral                 = "{ev:(?i)events}"
+	KubectlLiteral               = "{ku:(?i)kubectl}"
+	ContainersLiteral            = "{co:(?i)containers}"
+	UnderlaysLiteral             = "{un:(?i)underlays}"
+	DefaultLiteral               = "{up:(?i)default}"
+	ListCredentialLiteral        = "{li:(?i)listcredential}"
 )
 
 const (
@@ -39,6 +40,8 @@ const (
 	PathResourceGroupNameParameter = "resourceGroupName"
 	// PathResourceNameParameter is the path parameter name used in routing for the resource name
 	PathResourceNameParameter = "resourceName"
+	// PathProviderRegistrationParameter is the path parameter name used in routing for the provider registration
+	PathProviderRegistrationParameter = "providerRegistration"
 	// RequestAPIVersionParameterName is the query string parameter name ARM adds for the api version
 	RequestAPIVersionParameterName = "api-version"
 	// TerraformRPNamespace is the ARM namespace for Terraform RP
@@ -64,15 +67,25 @@ const (
 		PathResourceGroupNameParameter +
 		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + ResourcesLiteral + "/{" +
 		PathResourceNameParameter + "}"
+
+	// ProviderRegistrationOperationRoute is the route used to perform PUT/GET/DELETE on one provider registration
+	// /{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Terraform-OSS/providerregistrations/{providerRegistration}
+	ProviderRegistrationOperationRoute = SubscriptionResourceOperationRoute + "/" + ResourceGroupsLiteral + "/{" +
+		PathResourceGroupNameParameter +
+		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + ProviderRegistrationsLiteral + "/{" +
+		PathProviderRegistrationParameter + "}"
 )
 
 const (
 	// GetResourceControllerName is the constant logged for get resource calls
 	GetResourceControllerName = "GetResourceController"
 
-	// PutResourceControllerName is the constant logged for get resource calls
+	// PutResourceControllerName is the constant logged for put resource calls
 	PutResourceControllerName = "PutResourceController"
 
-	// DeleteResourceControllerName is the constant logged for get resource calls
+	// DeleteResourceControllerName is the constant logged for delete resource calls
 	DeleteResourceControllerName = "DeleteResourceController"
+
+	// PutProviderRegistrationControllerName is the constant logged for put provider registration calls
+	PutProviderRegistrationControllerName = "PutProviderRegistrationController"
 )
