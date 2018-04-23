@@ -6,6 +6,7 @@ import (
 	"TFRP/kubernetes"
 	"TFRP/pkg/core/consts"
 	"TFRP/pkg/core/engines"
+	"TFRP/pkg/core/storage"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -496,35 +497,10 @@ func putProviderRegistrationController(request *restful.Request, response *restf
 
 	provider := Provider{}
 	rawBody, err := ioutil.ReadAll(request.Request.Body)
-	fmt.Printf("%s", string(rawBody))
 	err = json.Unmarshal(rawBody, &provider)
-	if err != nil {
-		fmt.Printf("Can't connect to mongo, go error %v\n", err)
-		os.Exit(1)
-	}
-
-	// Create a session which maintains a pool of socket connections
-	// to our MongoDB.
-	session, err := mgo.DialWithInfo(dialInfo)
-
-	if err != nil {
-		fmt.Printf("Can't connect to mongo, go error %v\n", err)
-		os.Exit(1)
-	}
-
-	defer session.Close()
-
-	// SetSafe changes the session safety mode.
-	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
-	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
-	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
-	session.SetSafe(&mgo.Safe{})
-
-	// get collection
-	collection := session.DB(database).C("provider")
 
 	// insert Document in collection
-	err = collection.Insert(&Package{
+	err = storage.GetProviderRegistrationDataProvider().Insert(&Package{
 		ResourceId:   fullyQualifiedResourceID,
 		ProviderName: provider.Properties.ProviderName,
 		Config:       provider.Properties.Settings.Config,
@@ -537,7 +513,7 @@ func putProviderRegistrationController(request *restful.Request, response *restf
 
 	// Get Document from collection
 	result := Package{}
-	err = collection.Find(bson.M{"resourceid": fullyQualifiedResourceID}).One(&result)
+	err = storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
@@ -551,29 +527,10 @@ func putProviderRegistrationController(request *restful.Request, response *restf
 // Get resources
 func getResourceController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
-	// Create a session which maintains a pool of socket connections
-	// to our MongoDB.
-	session, err := mgo.DialWithInfo(dialInfo)
-
-	if err != nil {
-		fmt.Printf("Can't connect to mongo, go error %v\n", err)
-		os.Exit(1)
-	}
-
-	defer session.Close()
-
-	// SetSafe changes the session safety mode.
-	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
-	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
-	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
-	session.SetSafe(&mgo.Safe{})
-
-	// get collection
-	collection := session.DB(database).C("resource")
 
 	// Get Document from collection
 	result := ResourcePackage{}
-	err = collection.Find(bson.M{"resourceid": fullyQualifiedResourceID}).One(&result)
+	err := storage.GetResourceDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
@@ -619,29 +576,9 @@ func putResourceController(request *restful.Request, response *restful.Response)
 	rawBody, err := ioutil.ReadAll(request.Request.Body)
 	err = json.Unmarshal(rawBody, &resource)
 
-	// Create a session which maintains a pool of socket connections
-	// to our MongoDB.
-	session, err := mgo.DialWithInfo(dialInfo)
-
-	if err != nil {
-		fmt.Printf("Can't connect to mongo, go error %v\n", err)
-		os.Exit(1)
-	}
-
-	defer session.Close()
-
-	// SetSafe changes the session safety mode.
-	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
-	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
-	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
-	session.SetSafe(&mgo.Safe{})
-
-	// get collection
-	collection := session.DB(database).C("provider")
-
 	// Get Document from collection
 	result := Package{}
-	err = collection.Find(bson.M{"resourceid": resource.Properties.ProviderID}).One(&result)
+	err = storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": resource.Properties.ProviderID}, &result)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
@@ -683,13 +620,10 @@ func putResourceController(request *restful.Request, response *restful.Response)
 		resultState, _ := provider.Apply(info, state, diff)
 		fmt.Printf("%s", resultState.ID)
 
-		// Storage operations
-		collection := session.DB(database).C("resource")
-
 		fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 		// insert Document in collection
-		err = collection.Insert(&ResourcePackage{
+		err = storage.GetResourceDataProvider().Insert(&ResourcePackage{
 			ResourceID:   fullyQualifiedResourceID,
 			StateID:      resultState.ID,
 			Config:       configFile,
@@ -711,29 +645,9 @@ func putResourceController(request *restful.Request, response *restful.Response)
 func deleteResourceController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
-	// Create a session which maintains a pool of socket connections
-	// to our MongoDB.
-	session, err := mgo.DialWithInfo(dialInfo)
-
-	if err != nil {
-		fmt.Printf("Can't connect to mongo, go error %v\n", err)
-		os.Exit(1)
-	}
-
-	defer session.Close()
-
-	// SetSafe changes the session safety mode.
-	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
-	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
-	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
-	session.SetSafe(&mgo.Safe{})
-
-	// get collection
-	collection := session.DB(database).C("resource")
-
 	// Get Document from collection
 	result := ResourcePackage{}
-	err = collection.Find(bson.M{"resourceid": fullyQualifiedResourceID}).One(&result)
+	err := storage.GetResourceDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
