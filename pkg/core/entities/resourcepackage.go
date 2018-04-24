@@ -8,7 +8,7 @@ import "gopkg.in/mgo.v2/bson"
 
 // ResourcePackage is the package stored in storag
 type ResourcePackage struct {
-	Id           bson.ObjectId `bson:"_id,omitempty"`
+	ID           bson.ObjectId `bson:"_id,omitempty"`
 	ResourceID   string
 	StateID      string
 	Config       string

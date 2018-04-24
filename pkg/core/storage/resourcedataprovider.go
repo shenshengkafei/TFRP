@@ -6,6 +6,9 @@ package storage
 
 import (
 	"TFRP/pkg/core/consts"
+	"TFRP/pkg/core/entities"
+
+	"gopkg.in/mgo.v2/bson"
 )
 
 // ResourceDataProvider is the base struc of all data provider
@@ -24,11 +27,11 @@ func GetResourceDataProvider() *ResourceDataProvider {
 }
 
 // Insert inserts a doc into collection
-func (resourceDataProvider *ResourceDataProvider) Insert(doc interface{}) error {
-	return resourceDataProvider.baseDataProvider.Insert(consts.ResourceCollectionName, doc)
+func (resourceDataProvider *ResourceDataProvider) Insert(doc *entities.ResourcePackage) error {
+	return resourceDataProvider.baseDataProvider.Insert(consts.ResourceCollectionName, bson.M{"resourceid": doc.ResourceID}, doc)
 }
 
 // Find returns a doc from colletion
-func (resourceDataProvider *ResourceDataProvider) Find(qurey interface{}, result interface{}) error {
-	return resourceDataProvider.baseDataProvider.Find(consts.ResourceCollectionName, qurey, result)
+func (resourceDataProvider *ResourceDataProvider) Find(resourceID string, result interface{}) error {
+	return resourceDataProvider.baseDataProvider.Find(consts.ResourceCollectionName, bson.M{"resourceid": resourceID}, result)
 }

@@ -16,7 +16,6 @@ import (
 	restful "github.com/emicklei/go-restful"
 	"github.com/hashicorp/terraform/config"
 	"github.com/hashicorp/terraform/terraform"
-	"gopkg.in/mgo.v2/bson"
 )
 
 // GetResourceController returns a resource
@@ -24,18 +23,18 @@ func GetResourceController(request *restful.Request, response *restful.Response)
 	fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 	// Get Document from collection
-	result := entities.ResourcePackage{}
-	err := storage.GetResourceDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
+	resourcePackage := entities.ResourcePackage{}
+	err := storage.GetResourceDataProvider().Find(fullyQualifiedResourceID, &resourcePackage)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
 	}
 
-	fmt.Printf("%s", result.Config)
+	fmt.Printf("%s", resourcePackage.Config)
 
-	provider := engines.GetProvider(result.ProviderType)
+	provider := engines.GetProvider(resourcePackage.ProviderType)
 
-	cfg, err := config.Load(result.Config)
+	cfg, err := config.Load(resourcePackage.Config)
 	if err != nil {
 		fmt.Printf("%s", err)
 	}
@@ -46,22 +45,22 @@ func GetResourceController(request *restful.Request, response *restful.Response)
 	}
 
 	info := &terraform.InstanceInfo{
-		Type: result.ResourceType,
+		Type: resourcePackage.ResourceType,
 	}
 
 	state := new(terraform.InstanceState)
 	state.Init()
-	state.ID = result.StateID
+	state.ID = resourcePackage.StateID
 
 	// Call refresh
-	resultState, err := provider.Refresh(info, state)
+	resourceState, err := provider.Refresh(info, state)
 	if err != nil {
 		fmt.Printf("%s", err)
 	}
 
-	responseBody, _ := json.Marshal(resultState)
+	responseContent, _ := json.Marshal(resourceState)
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	response.Write(responseBody)
+	response.Write(responseContent)
 }
 
 // PutResourceController creates/updates a resource
@@ -72,8 +71,8 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 	err = json.Unmarshal(rawBody, &resourceDefinition)
 
 	// Get Document from collection
-	result := entities.ProviderRegistrationPackage{}
-	err = storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": resourceDefinition.Properties.ProviderID}, &result)
+	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
+	err = storage.GetProviderRegistrationDataProvider().Find(resourceDefinition.Properties.ProviderID, &providerRegistrationPackage)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
@@ -82,10 +81,10 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 	resourceSpec, _ := json.Marshal(resourceDefinition.Properties.Settings)
 
 	// configFile := getKubernetesTemplateInJson(decoded, resourceDefinition, engines.GetResourceName(request), resourceSpec)
-	configFile := getConfigFileInJSON(result.ProviderType, result.Credentials, resourceDefinition, engines.GetResourceName(request), resourceSpec)
+	configFile := getConfigFileInJSON(providerRegistrationPackage.ProviderType, providerRegistrationPackage.Credentials, resourceDefinition, engines.GetResourceName(request), resourceSpec)
 	fmt.Printf("%s", configFile)
 
-	provider := engines.GetProvider(result.ProviderType)
+	provider := engines.GetProvider(providerRegistrationPackage.ProviderType)
 
 	cfg, err := config.Load(configFile)
 	if err != nil {
@@ -110,18 +109,21 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 		}
 
 		// Call apply to create resource
-		resultState, _ := provider.Apply(info, state, diff)
-		fmt.Printf("%s", resultState.ID)
+		resourceState, err := provider.Apply(info, state, diff)
+		if err != nil {
+			fmt.Printf("%s", err)
+		}
+		fmt.Printf("%s", resourceState.ID)
 
 		fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 		// insert Document in collection
 		err = storage.GetResourceDataProvider().Insert(&entities.ResourcePackage{
 			ResourceID:   fullyQualifiedResourceID,
-			StateID:      resultState.ID,
+			StateID:      resourceState.ID,
 			Config:       configFile,
 			ResourceType: resourceDefinition.Properties.ResourceType,
-			ProviderType: result.ProviderType,
+			ProviderType: providerRegistrationPackage.ProviderType,
 		})
 
 		if err != nil {
@@ -130,9 +132,9 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 		}
 	}
 
-	responseBody, _ := json.Marshal(resourceDefinition)
+	responseContent, _ := json.Marshal(resourceDefinition)
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	response.Write(responseBody)
+	response.Write(responseContent)
 }
 
 // DeleteResourceController deletes a resource
@@ -140,18 +142,18 @@ func DeleteResourceController(request *restful.Request, response *restful.Respon
 	fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 	// Get Document from collection
-	result := entities.ResourcePackage{}
-	err := storage.GetResourceDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
+	resourcePackage := entities.ResourcePackage{}
+	err := storage.GetResourceDataProvider().Find(fullyQualifiedResourceID, &resourcePackage)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
 	}
 
-	fmt.Printf("%s", result.Config)
+	fmt.Printf("%s", resourcePackage.Config)
 
-	provider := engines.GetProvider(result.ProviderType)
+	provider := engines.GetProvider(resourcePackage.ProviderType)
 
-	cfg, err := config.Load(result.Config)
+	cfg, err := config.Load(resourcePackage.Config)
 	if err != nil {
 		fmt.Printf("%s", err)
 	}
@@ -162,21 +164,24 @@ func DeleteResourceController(request *restful.Request, response *restful.Respon
 	}
 
 	info := &terraform.InstanceInfo{
-		Type: result.ResourceType,
+		Type: resourcePackage.ResourceType,
 	}
 
 	state := new(terraform.InstanceState)
-	state.ID = result.StateID
+	state.ID = resourcePackage.StateID
 
 	diff := new(terraform.InstanceDiff)
 	diff.Destroy = true
 
 	// Call apply to delete resource
-	resultState, _ := provider.Apply(info, state, diff)
+	resourceState, err := provider.Apply(info, state, diff)
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
 
-	responseBody, _ := json.Marshal(resultState)
+	responseContent, _ := json.Marshal(resourceState)
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	response.Write(responseBody)
+	response.Write(responseContent)
 }
 
 func getConfigFileInJSON(providerType string, providerSpec []byte, resource entities.ResourceDefinition, resourceName string, resourceSpec []byte) string {

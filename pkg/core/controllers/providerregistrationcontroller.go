@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	restful "github.com/emicklei/go-restful"
-	"gopkg.in/mgo.v2/bson"
 )
 
 // GetProviderRegistrationController returns a provider registration
@@ -28,16 +27,20 @@ func GetProviderRegistrationController(request *restful.Request, response *restf
 	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
 
 	// Get Document from collection
-	result := entities.ProviderRegistrationPackage{}
-	err := storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
+	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
+	err := storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
 	}
 
-	responseBody, _ := json.Marshal(result)
+	responseContent, err := json.Marshal(providerRegistrationPackage)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	response.Write(responseBody)
+	response.Write(responseContent)
 }
 
 // PutProviderRegistrationController create a new provider registration
@@ -46,8 +49,16 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 
 	providerRegistrationDefinition := entities.ProviderRegistrationDefinition{}
 	rawBody, err := ioutil.ReadAll(request.Request.Body)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
 	err = json.Unmarshal(rawBody, &providerRegistrationDefinition)
-	credentials, _ := json.Marshal(providerRegistrationDefinition.Properties.Settings)
+	credentials, err := json.Marshal(providerRegistrationDefinition.Properties.Settings)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
 
 	if strings.EqualFold(consts.KubernetesProvider, providerRegistrationDefinition.Properties.ProviderType) {
 		credentials = getKubernetesProviderCredentials(providerRegistrationDefinition.Properties.Settings)
@@ -67,16 +78,16 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 	}
 
 	// Get Document from collection
-	result := entities.ProviderRegistrationPackage{}
-	err = storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
+	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
+	err = storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
 	}
 
-	responseBody, _ := json.Marshal(result)
+	responseContent, _ := json.Marshal(providerRegistrationPackage)
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	response.Write(responseBody)
+	response.Write(responseContent)
 }
 
 // DeleteProviderRegistrationController removes a provider registration
@@ -84,22 +95,22 @@ func DeleteProviderRegistrationController(request *restful.Request, response *re
 	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
 
 	// Get Document from collection
-	result := entities.ProviderRegistrationPackage{}
-	err := storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
+	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
+	err := storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
 		return
 	}
 
-	err = storage.GetProviderRegistrationDataProvider().Remove(bson.M{"_id": result.Id})
+	err = storage.GetProviderRegistrationDataProvider().Remove(fullyQualifiedResourceID)
 	if err != nil {
 		log.Fatal("Error deleting record: ", err)
 		return
 	}
 
-	responseBody, _ := json.Marshal(result)
+	responseContent, _ := json.Marshal(providerRegistrationPackage)
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	response.Write(responseBody)
+	response.Write(responseContent)
 }
 
 func getKubernetesProviderCredentials(credentials interface{}) []byte {

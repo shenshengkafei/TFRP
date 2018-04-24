@@ -20,20 +20,9 @@ type BaseDataProvider struct {
 }
 
 // Insert inserts a doc into collection
-func (baseDataProvider *BaseDataProvider) Insert(collectionName string, doc interface{}) error {
-	// DialInfo holds options for establishing a session with a MongoDB cluster.
-	dialInfo := &mgo.DialInfo{
-		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", baseDataProvider.Database)}, // Get HOST + PORT
-		Timeout:  60 * time.Second,
-		Database: baseDataProvider.Database, // It can be anything
-		Username: baseDataProvider.Database, // Username
-		Password: baseDataProvider.Password, // PASSWORD
-		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-			return tls.Dial("tcp", addr.String(), &tls.Config{})
-		},
-	}
-
-	session, err := mgo.DialWithInfo(dialInfo)
+func (baseDataProvider *BaseDataProvider) Insert(collectionName string, id interface{}, doc interface{}) error {
+	// Get session
+	session, err := baseDataProvider.getDocDBSession()
 	if err != nil {
 		return err
 	}
@@ -49,26 +38,15 @@ func (baseDataProvider *BaseDataProvider) Insert(collectionName string, doc inte
 	// get collection
 	collection := session.DB(baseDataProvider.Database).C(collectionName)
 
-	err = collection.Insert(doc)
+	_, err = collection.Upsert(id, doc)
 
 	return err
 }
 
 // Find returns a doc from collection
 func (baseDataProvider *BaseDataProvider) Find(collectionName string, qurey interface{}, result interface{}) error {
-	// DialInfo holds options for establishing a session with a MongoDB cluster.
-	dialInfo := &mgo.DialInfo{
-		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", baseDataProvider.Database)}, // Get HOST + PORT
-		Timeout:  60 * time.Second,
-		Database: baseDataProvider.Database, // It can be anything
-		Username: baseDataProvider.Database, // Username
-		Password: baseDataProvider.Password, // PASSWORD
-		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-			return tls.Dial("tcp", addr.String(), &tls.Config{})
-		},
-	}
-
-	session, err := mgo.DialWithInfo(dialInfo)
+	// Get session
+	session, err := baseDataProvider.getDocDBSession()
 	if err != nil {
 		return err
 	}
@@ -91,19 +69,8 @@ func (baseDataProvider *BaseDataProvider) Find(collectionName string, qurey inte
 
 // Remove deletes a doc from collection
 func (baseDataProvider *BaseDataProvider) Remove(collectionName string, qurey interface{}) error {
-	// DialInfo holds options for establishing a session with a MongoDB cluster.
-	dialInfo := &mgo.DialInfo{
-		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", baseDataProvider.Database)}, // Get HOST + PORT
-		Timeout:  60 * time.Second,
-		Database: baseDataProvider.Database, // It can be anything
-		Username: baseDataProvider.Database, // Username
-		Password: baseDataProvider.Password, // PASSWORD
-		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-			return tls.Dial("tcp", addr.String(), &tls.Config{})
-		},
-	}
-
-	session, err := mgo.DialWithInfo(dialInfo)
+	// Get session
+	session, err := baseDataProvider.getDocDBSession()
 	if err != nil {
 		return err
 	}
@@ -122,4 +89,20 @@ func (baseDataProvider *BaseDataProvider) Remove(collectionName string, qurey in
 	err = collection.Remove(qurey)
 
 	return err
+}
+
+func (baseDataProvider *BaseDataProvider) getDocDBSession() (*mgo.Session, error) {
+	// DialInfo holds options for establishing a session with a MongoDB cluster.
+	dialInfo := &mgo.DialInfo{
+		Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", baseDataProvider.Database)}, // Get HOST + PORT
+		Timeout:  60 * time.Second,
+		Database: baseDataProvider.Database, // It can be anything
+		Username: baseDataProvider.Database, // Username
+		Password: baseDataProvider.Password, // PASSWORD
+		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
+			return tls.Dial("tcp", addr.String(), &tls.Config{})
+		},
+	}
+
+	return mgo.DialWithInfo(dialInfo)
 }
