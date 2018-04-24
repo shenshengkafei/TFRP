@@ -35,3 +35,8 @@ func (resourceDataProvider *ResourceDataProvider) Insert(doc *entities.ResourceP
 func (resourceDataProvider *ResourceDataProvider) Find(resourceID string, result interface{}) error {
 	return resourceDataProvider.baseDataProvider.Find(consts.ResourceCollectionName, bson.M{"resourceid": resourceID}, result)
 }
+
+// Remove deletes a doc from collection
+func (resourceDataProvider *ResourceDataProvider) Remove(resourceID string) error {
+	return resourceDataProvider.baseDataProvider.Remove(consts.ResourceCollectionName, bson.M{"resourceid": resourceID})
+}

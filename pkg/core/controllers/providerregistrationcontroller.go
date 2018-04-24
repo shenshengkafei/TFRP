@@ -8,6 +8,7 @@
 package controllers
 
 import (
+	"TFRP/pkg/core/apierror"
 	"TFRP/pkg/core/consts"
 	"TFRP/pkg/core/engines"
 	"TFRP/pkg/core/entities"
@@ -16,7 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
+	"net/http"
 	"strings"
 
 	restful "github.com/emicklei/go-restful"
@@ -30,13 +31,23 @@ func GetProviderRegistrationController(request *restful.Request, response *restf
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
 	err := storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
-		log.Fatal("Error finding record: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusNotFound,
+			apierror.ClientError,
+			apierror.NotFound,
+			err.Error())
 		return
 	}
 
 	responseContent, err := json.Marshal(providerRegistrationPackage)
 	if err != nil {
-		log.Fatal("Error finding record: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to serialize provider registration package: %s", err.Error()))
 		return
 	}
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
@@ -50,18 +61,48 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 	providerRegistrationDefinition := entities.ProviderRegistrationDefinition{}
 	rawBody, err := ioutil.ReadAll(request.Request.Body)
 	if err != nil {
-		log.Fatal("Error finding record: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to read request content: %s", err.Error()))
 		return
 	}
+
 	err = json.Unmarshal(rawBody, &providerRegistrationDefinition)
+	if err != nil {
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to deserialize request content: %s", err.Error()))
+		return
+	}
+
 	credentials, err := json.Marshal(providerRegistrationDefinition.Properties.Settings)
 	if err != nil {
-		log.Fatal("Error finding record: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to serialize provider registration settings: %s", err.Error()))
 		return
 	}
 
 	if strings.EqualFold(consts.KubernetesProvider, providerRegistrationDefinition.Properties.ProviderType) {
-		credentials = getKubernetesProviderCredentials(providerRegistrationDefinition.Properties.Settings)
+		credentials, err = getKubernetesProviderCredentials(providerRegistrationDefinition.Properties.Settings)
+		if err != nil {
+			apierror.WriteErrorToResponse(
+				response,
+				http.StatusInternalServerError,
+				apierror.InternalError,
+				apierror.InternalOperationError,
+				fmt.Sprintf("Failed to get Kubernetes provider credentials: %s", err.Error()))
+			return
+		}
 	}
 
 	fmt.Printf("%s", string(credentials))
@@ -73,7 +114,12 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 	})
 
 	if err != nil {
-		log.Fatal("Problem inserting data: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to insert data: %s", err.Error()))
 		return
 	}
 
@@ -81,11 +127,26 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
 	err = storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
-		log.Fatal("Error finding record: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to find data: %s", err.Error()))
 		return
 	}
 
-	responseContent, _ := json.Marshal(providerRegistrationPackage)
+	responseContent, err := json.Marshal(providerRegistrationPackage)
+	if err != nil {
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to serialize response content: %s", err.Error()))
+		return
+	}
+
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
 	response.Write(responseContent)
 }
@@ -98,40 +159,58 @@ func DeleteProviderRegistrationController(request *restful.Request, response *re
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
 	err := storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
-		log.Fatal("Error finding record: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusNotFound,
+			apierror.ClientError,
+			apierror.NotFound,
+			fmt.Sprintf("Provider '%s' was not found.", fullyQualifiedResourceID))
 		return
 	}
 
 	err = storage.GetProviderRegistrationDataProvider().Remove(fullyQualifiedResourceID)
 	if err != nil {
-		log.Fatal("Error deleting record: ", err)
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to delete data: %s", err.Error()))
 		return
 	}
 
-	responseContent, _ := json.Marshal(providerRegistrationPackage)
+	responseContent, err := json.Marshal(providerRegistrationPackage)
+	if err != nil {
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to serialize response content: %s", err.Error()))
+		return
+	}
+
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
 	response.Write(responseContent)
 }
 
-func getKubernetesProviderCredentials(credentials interface{}) []byte {
+func getKubernetesProviderCredentials(credentials interface{}) ([]byte, error) {
 	kubeCredentials := &entities.KubernetesProviderCredential{}
 
 	byteData, err := json.Marshal(credentials)
 	if err != nil {
-		fmt.Printf("%s", err)
+		return nil, err
 	}
 
 	err = json.Unmarshal(byteData, &kubeCredentials)
 	if err != nil {
-		fmt.Printf("%s", err)
+		return nil, err
 	}
-	fmt.Printf("%s", kubeCredentials.InlineConfig)
 
 	decodedConfig, err := base64.StdEncoding.DecodeString(kubeCredentials.InlineConfig)
 	if err != nil {
-		fmt.Printf("%s", err)
+		return nil, err
 	}
-	fmt.Printf("%s", decodedConfig)
 
 	decodedKubeCredentials := &entities.KubernetesProviderCredential{
 		InlineConfig: string(decodedConfig),
@@ -139,8 +218,8 @@ func getKubernetesProviderCredentials(credentials interface{}) []byte {
 
 	result, err := json.Marshal(decodedKubeCredentials)
 	if err != nil {
-		fmt.Printf("%s", err)
+		return nil, err
 	}
 
-	return result
+	return result, nil
 }
