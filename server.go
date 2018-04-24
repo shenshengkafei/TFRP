@@ -5,6 +5,7 @@ import (
 	"TFRP/datadog"
 	"TFRP/kubernetes"
 	"TFRP/pkg/core/consts"
+	"TFRP/pkg/core/controllers"
 	"TFRP/pkg/core/engines"
 	"TFRP/pkg/core/storage"
 	"crypto/tls"
@@ -66,7 +67,7 @@ func initRoutes() {
 func addProvidersOperationRoutes(webService *restful.WebService) {
 	webService.Route(webService.
 		PUT(consts.ProviderRegistrationOperationRoute).
-		To(putProviderRegistrationController).
+		To(controllers.PutProviderRegistrationController).
 		Doc("Create/update a provider registration").
 		Operation(consts.PutProviderRegistrationControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -78,7 +79,7 @@ func addProvidersOperationRoutes(webService *restful.WebService) {
 func addResourcesOperationRoutes(webService *restful.WebService) {
 	webService.Route(webService.
 		GET(consts.ResourceOperationRoute).
-		To(getResourceController).
+		To(controllers.GetResourceController).
 		Doc("Get a resource").
 		Operation(consts.GetResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -88,7 +89,7 @@ func addResourcesOperationRoutes(webService *restful.WebService) {
 
 	webService.Route(webService.
 		PUT(consts.ResourceOperationRoute).
-		To(putResourceController).
+		To(controllers.PutResourceController).
 		Doc("Create/update a resource").
 		Operation(consts.PutResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -98,7 +99,7 @@ func addResourcesOperationRoutes(webService *restful.WebService) {
 
 	webService.Route(webService.
 		DELETE(consts.ResourceOperationRoute).
-		To(deleteResourceController).
+		To(controllers.DeleteResourceController).
 		Doc("Delete a resource").
 		Operation(consts.DeleteResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).

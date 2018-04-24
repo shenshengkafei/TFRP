@@ -2,9 +2,6 @@
 // Copyright (c) Microsoft Corporation.  All rights reserved.
 //------------------------------------------------------------
 
-// This file is for code about storing and retrieving api tracking
-// info from a context struct
-
 package engines
 
 import (
