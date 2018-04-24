@@ -23,12 +23,17 @@ func GetProviderRegistrationDataProvider() *ProviderRegistrationDataProvider {
 	}
 }
 
-// Insert inserts the data into collection
+// Insert inserts a doc into collection
 func (providerRegistrationDataProvider *ProviderRegistrationDataProvider) Insert(doc interface{}) error {
 	return providerRegistrationDataProvider.baseDataProvider.Insert(consts.ProviderRegistrationCollectionName, doc)
 }
 
-// Find returns the data
+// Find returns a doc from collection
 func (providerRegistrationDataProvider *ProviderRegistrationDataProvider) Find(qurey interface{}, result interface{}) error {
 	return providerRegistrationDataProvider.baseDataProvider.Find(consts.ProviderRegistrationCollectionName, qurey, result)
+}
+
+// Remove deletes a doc from collection
+func (providerRegistrationDataProvider *ProviderRegistrationDataProvider) Remove(qurey interface{}) error {
+	return providerRegistrationDataProvider.baseDataProvider.Remove(consts.ProviderRegistrationCollectionName, qurey)
 }

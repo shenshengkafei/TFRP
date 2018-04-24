@@ -51,10 +51,30 @@ func initRoutes() {
 
 func addProvidersOperationRoutes(webService *restful.WebService) {
 	webService.Route(webService.
+		GET(consts.ProviderRegistrationOperationRoute).
+		To(controllers.GetProviderRegistrationController).
+		Doc("Get a provider registration").
+		Operation(consts.GetProviderRegistrationControllerName).
+		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
+		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
+		Param(webService.PathParameter(consts.PathProviderRegistrationParameter, "Name of provider registration").DataType("string")).
+		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
+
+	webService.Route(webService.
 		PUT(consts.ProviderRegistrationOperationRoute).
 		To(controllers.PutProviderRegistrationController).
 		Doc("Create/update a provider registration").
 		Operation(consts.PutProviderRegistrationControllerName).
+		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
+		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
+		Param(webService.PathParameter(consts.PathProviderRegistrationParameter, "Name of provider registration").DataType("string")).
+		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
+
+	webService.Route(webService.
+		DELETE(consts.ProviderRegistrationOperationRoute).
+		To(controllers.DeleteProviderRegistrationController).
+		Doc("Delete a provider registration").
+		Operation(consts.DeleteProviderRegistrationControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
 		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
 		Param(webService.PathParameter(consts.PathProviderRegistrationParameter, "Name of provider registration").DataType("string")).

@@ -79,13 +79,15 @@ const (
 const (
 	// GetResourceControllerName is the constant logged for get resource calls
 	GetResourceControllerName = "GetResourceController"
-
 	// PutResourceControllerName is the constant logged for put resource calls
 	PutResourceControllerName = "PutResourceController"
-
 	// DeleteResourceControllerName is the constant logged for delete resource calls
 	DeleteResourceControllerName = "DeleteResourceController"
 
+	// GetProviderRegistrationControllerName is the constant logged for get provider registration calls
+	GetProviderRegistrationControllerName = "GetProviderRegistrationController"
 	// PutProviderRegistrationControllerName is the constant logged for put provider registration calls
 	PutProviderRegistrationControllerName = "PutProviderRegistrationController"
+	// DeleteProviderRegistrationControllerName is the constant logged for delete provider registration calls
+	DeleteProviderRegistrationControllerName = "DeleteProviderRegistrationController"
 )

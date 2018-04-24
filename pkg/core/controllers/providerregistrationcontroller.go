@@ -23,6 +23,23 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// GetProviderRegistrationController returns a provider registration
+func GetProviderRegistrationController(request *restful.Request, response *restful.Response) {
+	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
+
+	// Get Document from collection
+	result := entities.ProviderRegistrationPackage{}
+	err := storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	responseBody, _ := json.Marshal(result)
+	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+	response.Write(responseBody)
+}
+
 // PutProviderRegistrationController create a new provider registration
 func PutProviderRegistrationController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
@@ -54,6 +71,29 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 	err = storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
 	if err != nil {
 		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	responseBody, _ := json.Marshal(result)
+	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+	response.Write(responseBody)
+}
+
+// DeleteProviderRegistrationController removes a provider registration
+func DeleteProviderRegistrationController(request *restful.Request, response *restful.Response) {
+	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
+
+	// Get Document from collection
+	result := entities.ProviderRegistrationPackage{}
+	err := storage.GetProviderRegistrationDataProvider().Find(bson.M{"resourceid": fullyQualifiedResourceID}, &result)
+	if err != nil {
+		log.Fatal("Error finding record: ", err)
+		return
+	}
+
+	err = storage.GetProviderRegistrationDataProvider().Remove(bson.M{"_id": result.Id})
+	if err != nil {
+		log.Fatal("Error deleting record: ", err)
 		return
 	}
 

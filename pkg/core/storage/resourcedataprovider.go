@@ -23,12 +23,12 @@ func GetResourceDataProvider() *ResourceDataProvider {
 	}
 }
 
-// Insert inserts the data into collection
+// Insert inserts a doc into collection
 func (resourceDataProvider *ResourceDataProvider) Insert(doc interface{}) error {
 	return resourceDataProvider.baseDataProvider.Insert(consts.ResourceCollectionName, doc)
 }
 
-// Find returns the data
+// Find returns a doc from colletion
 func (resourceDataProvider *ResourceDataProvider) Find(qurey interface{}, result interface{}) error {
 	return resourceDataProvider.baseDataProvider.Find(consts.ResourceCollectionName, qurey, result)
 }
