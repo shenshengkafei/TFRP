@@ -20,20 +20,12 @@ var (
 )
 
 func main() {
-	// router := mux.NewRouter()
-	// router.NotFoundHandler = http.HandlerFunc(NotFound)
-	// router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/provider/{provider}", putProvider).Methods("PUT")
-	// router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}", getResource).Methods("GET")
-	// router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}", putResource).Methods("PUT")
-	// router.HandleFunc("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resource/{resource}", deleteResource).Methods("DELETE")
-	// //log.Fatal(http.ListenAndServeTLS(":443", "fullchain.pem", "privkey.pem", router))
-	// log.Fatal(http.ListenAndServe(":8080", router))
-
 	pflag.Parse()
 
 	initRoutes()
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	go log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServeTLS(":443", "fullchain.pem", "privkey.pem", nil))
 }
 
 func initRoutes() {
