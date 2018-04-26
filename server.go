@@ -24,7 +24,9 @@ func main() {
 
 	initRoutes()
 
-	go log.Fatal(http.ListenAndServe(":8080", nil))
+	go func() {
+		go log.Fatal(http.ListenAndServe(":8080", nil))
+	}()
 	log.Fatal(http.ListenAndServeTLS(":443", "fullchain.pem", "privkey.pem", nil))
 }
 

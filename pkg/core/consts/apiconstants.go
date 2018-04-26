@@ -45,7 +45,7 @@ const (
 	// RequestAPIVersionParameterName is the query string parameter name ARM adds for the api version
 	RequestAPIVersionParameterName = "api-version"
 	// TerraformRPNamespace is the ARM namespace for Terraform RP
-	TerraformRPNamespace = "Microsoft.Terraform-OSS"
+	TerraformRPNamespace = "Microsoft.TerraformOSS"
 )
 
 // subscription and common routes.
@@ -62,14 +62,14 @@ const (
 // resource operation routes
 const (
 	// ResourceOperationRoute is the route used to perform PUT/GET/DELETE on one resource
-	// /{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Terraform-OSS/resources/{resourceName}
+	// /{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.TerraformOSS/resources/{resourceName}
 	ResourceOperationRoute = SubscriptionResourceOperationRoute + "/" + ResourceGroupsLiteral + "/{" +
 		PathResourceGroupNameParameter +
 		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + ResourcesLiteral + "/{" +
 		PathResourceNameParameter + "}"
 
 	// ProviderRegistrationOperationRoute is the route used to perform PUT/GET/DELETE on one provider registration
-	// /{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Terraform-OSS/providerregistrations/{providerRegistration}
+	// /{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.TerraformOSS/providerregistrations/{providerRegistration}
 	ProviderRegistrationOperationRoute = SubscriptionResourceOperationRoute + "/" + ResourceGroupsLiteral + "/{" +
 		PathResourceGroupNameParameter +
 		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + ProviderRegistrationsLiteral + "/{" +
