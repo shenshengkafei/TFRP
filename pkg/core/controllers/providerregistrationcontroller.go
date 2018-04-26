@@ -40,7 +40,7 @@ func GetProviderRegistrationController(request *restful.Request, response *restf
 		return
 	}
 
-	responseContent, err := json.Marshal(providerRegistrationPackage)
+	responseContent, err := json.Marshal(providerRegistrationPackage.ToDefinition())
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -136,7 +136,7 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 		return
 	}
 
-	responseContent, err := json.Marshal(providerRegistrationPackage)
+	responseContent, err := json.Marshal(providerRegistrationPackage.ToDefinition())
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -179,19 +179,7 @@ func DeleteProviderRegistrationController(request *restful.Request, response *re
 		return
 	}
 
-	responseContent, err := json.Marshal(providerRegistrationPackage)
-	if err != nil {
-		apierror.WriteErrorToResponse(
-			response,
-			http.StatusInternalServerError,
-			apierror.InternalError,
-			apierror.InternalOperationError,
-			fmt.Sprintf("Failed to serialize response content: %s", err.Error()))
-		return
-	}
-
-	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
-	response.Write(responseContent)
+	response.WriteHeader(http.StatusOK)
 }
 
 func getKubernetesProviderCredentials(credentials interface{}) ([]byte, error) {

@@ -83,7 +83,9 @@ func GetResourceController(request *restful.Request, response *restful.Response)
 		return
 	}
 
-	responseContent, err := json.Marshal(resourceState)
+	resourcePackage.State = resourceState
+
+	responseContent, err := json.Marshal(resourcePackage.ToDefinition())
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,

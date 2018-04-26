@@ -13,3 +13,15 @@ type ProviderRegistrationPackage struct {
 	ProviderType string
 	Credentials  []byte
 }
+
+// ProviderRegistrationPackageDefinition is the package definition
+type ProviderRegistrationPackageDefinition struct {
+	Properties interface{}
+}
+
+// ToDefinition returns the definition
+func (providerRegistrationPackage *ProviderRegistrationPackage) ToDefinition() *ProviderRegistrationPackageDefinition {
+	return &ProviderRegistrationPackageDefinition{
+		Properties: providerRegistrationPackage,
+	}
+}

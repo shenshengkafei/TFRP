@@ -49,7 +49,7 @@ func GetProviderRegistrationName(request *restful.Request) string {
 }
 
 // GetFullyQualifiedResourceID returns the fully qualified resource id
-// /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/resources/{resource}
+// /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.TerraformOSS/resources/{resource}
 func GetFullyQualifiedResourceID(request *restful.Request) string {
 	return "/" + Subscriptions + "/" + GetSubscriptionID(request) +
 		"/" + ResourceGroups + "/" + GetResourceGroupName(request) +
@@ -58,7 +58,7 @@ func GetFullyQualifiedResourceID(request *restful.Request) string {
 }
 
 // GetFullyQualifiedProviderRegistrationID returns the fully qualified id of provider registration
-// /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Terraform-OSS/providerregistrations/{providerRegistration}
+// /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.TerraformOSS/providerregistrations/{providerRegistration}
 func GetFullyQualifiedProviderRegistrationID(request *restful.Request) string {
 	return "/" + Subscriptions + "/" + GetSubscriptionID(request) +
 		"/" + ResourceGroups + "/" + GetResourceGroupName(request) +
