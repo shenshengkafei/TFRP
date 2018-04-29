@@ -4,14 +4,17 @@
 
 package entities
 
-import "gopkg.in/mgo.v2/bson"
+import (
+	"github.com/hashicorp/terraform/terraform"
+	"gopkg.in/mgo.v2/bson"
+)
 
 // ResourcePackage is the package stored in storag
 type ResourcePackage struct {
 	ID           bson.ObjectId `bson:"_id,omitempty"`
 	ResourceID   string
 	StateID      string
-	State        interface{}
+	State        *terraform.InstanceState
 	Config       string
 	ResourceType string
 	ProviderType string

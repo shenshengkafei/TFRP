@@ -9,4 +9,6 @@ const (
 	KubernetesProvider = "kubernetes"
 	// DatadogProvider is name of Datadog provider
 	DatadogProvider = "datadog"
+	// CloudflareProvider is name of Cloudflare provider
+	CloudflareProvider = "cloudflare"
 )

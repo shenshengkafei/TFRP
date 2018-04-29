@@ -1624,6 +1624,7 @@ func (s *InstanceState) Init() {
 	}
 	if s.Meta == nil {
 		s.Meta = make(map[string]interface{})
+		s.Meta["schema_version"] = "1"
 	}
 	s.Ephemeral.init()
 }

@@ -5,6 +5,7 @@
 package engines
 
 import (
+	"TFRP/cloudflare"
 	"TFRP/datadog"
 	"TFRP/kubernetes"
 	"TFRP/pkg/core/consts"
@@ -19,6 +20,8 @@ func GetProvider(providerType string) *schema.Provider {
 		return kubernetes.Provider().(*schema.Provider)
 	case consts.DatadogProvider:
 		return datadog.Provider().(*schema.Provider)
+	case consts.CloudflareProvider:
+		return cloudflare.Provider().(*schema.Provider)
 	}
 
 	return nil

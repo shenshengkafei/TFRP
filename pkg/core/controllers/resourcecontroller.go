@@ -67,12 +67,8 @@ func GetResourceController(request *restful.Request, response *restful.Response)
 		Type: resourcePackage.ResourceType,
 	}
 
-	state := new(terraform.InstanceState)
-	state.Init()
-	state.ID = resourcePackage.StateID
-
 	// Call refresh
-	resourceState, err := provider.Refresh(info, state)
+	resourceState, err := provider.Refresh(info, resourcePackage.State)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -84,6 +80,18 @@ func GetResourceController(request *restful.Request, response *restful.Response)
 	}
 
 	resourcePackage.State = resourceState
+
+	// insert Document in collection
+	err = storage.GetResourceDataProvider().Insert(&resourcePackage)
+	if err != nil {
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to insert data: %s", err))
+		return
+	}
 
 	responseContent, err := json.Marshal(resourcePackage.ToDefinition())
 	if err != nil {
@@ -221,6 +229,7 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 		err = storage.GetResourceDataProvider().Insert(&entities.ResourcePackage{
 			ResourceID:   fullyQualifiedResourceID,
 			StateID:      resourceState.ID,
+			State:        resourceState,
 			Config:       configFile,
 			ResourceType: resourceDefinition.Properties.ResourceType,
 			ProviderType: providerRegistrationPackage.ProviderType,
@@ -299,14 +308,11 @@ func DeleteResourceController(request *restful.Request, response *restful.Respon
 		Type: resourcePackage.ResourceType,
 	}
 
-	state := new(terraform.InstanceState)
-	state.ID = resourcePackage.StateID
-
 	diff := new(terraform.InstanceDiff)
 	diff.Destroy = true
 
 	// Call apply to delete resource
-	resourceState, err := provider.Apply(info, state, diff)
+	resourceState, err := provider.Apply(info, resourcePackage.State, diff)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
