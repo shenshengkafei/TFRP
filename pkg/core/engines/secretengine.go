@@ -5,8 +5,10 @@
 package engines
 
 import (
+	"TFRP/pkg/core/consts"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/url"
 
@@ -18,9 +20,34 @@ import (
 
 // SecretEngine is the secret engine
 type SecretEngine struct {
-	tenantID     string
-	clientID     string
-	clientSecret string
+	TenantID     string
+	ClientID     string
+	ClientSecret string
+}
+
+// GetSecretEngine creates a secret engine
+func GetSecretEngine() (secretEngine *SecretEngine) {
+	tenantID, err := ioutil.ReadFile(consts.ServicePrincipalTenantIDPath)
+	if err != nil {
+		log.Fatal("Failed to get tenant id: ", err)
+	}
+
+	clientID, err := ioutil.ReadFile(consts.ServicePrincipalClientIDPath)
+	if err != nil {
+		log.Fatal("Failed to get client id: ", err)
+	}
+
+	clientSecret, err := ioutil.ReadFile(consts.ServicePrincipalClientSecretPath)
+	if err != nil {
+		log.Fatal("Failed to get client secret: ", err)
+	}
+
+	secretEngine = new(SecretEngine)
+	secretEngine.TenantID = string(tenantID)
+	secretEngine.ClientID = string(clientID)
+	secretEngine.ClientSecret = string(clientSecret)
+
+	return secretEngine
 }
 
 // GetSecretFromKeyVault returns a secret
@@ -29,9 +56,9 @@ func (secretEngine *SecretEngine) GetSecretFromKeyVault(vaultBaseURI string, sec
 	fmt.Printf("name %s", secretName)
 	fmt.Printf("version %s", secretVersion)
 
-	clientID := secretEngine.clientID
-	clientSecret := secretEngine.clientSecret
-	tenantID := secretEngine.tenantID
+	tenantID := secretEngine.TenantID
+	clientID := secretEngine.ClientID
+	clientSecret := secretEngine.ClientSecret
 
 	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, tenantID)
 	updatedAuthorizeEndpoint, err := url.Parse("https://login.windows.net/" + tenantID + "/oauth2/token")

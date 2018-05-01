@@ -7,6 +7,7 @@ package main
 import (
 	"TFRP/pkg/core/consts"
 	"TFRP/pkg/core/controllers"
+	"TFRP/pkg/core/engines"
 	"TFRP/pkg/core/storage"
 	"log"
 	"net/http"
@@ -32,16 +33,24 @@ func main() {
 }
 
 func initRoutes() {
+	// secretEngine := &engines.SecretEngine{
+	// 	TenantID:     "72f988bf-86f1-41af-91ab-2d7cd011db47",
+	// 	ClientID:     "962c0e07-48bc-4e30-b5fe-b95c11fe486c",
+	// 	ClientSecret: "c5c8960e1119c4e0f944",
+	// }
+	secretEngine := engines.GetSecretEngine()
+
+	storagePassword := secretEngine.GetSecretFromKeyVault(consts.StoragePasswordKVBaseURI, consts.StoragePasswordKVSecretName, consts.StoragePasswordKVSecretVersion)
+	providerRegistrationDataProvider := storage.NewProviderRegistrationDataProvider(consts.StorageDatabase, storagePassword)
+	resourceDataProvider := storage.NewResourceDataProvider(consts.StorageDatabase, storagePassword)
+	providerRegistrationManager := controllers.NewProviderRegistrationManager(providerRegistrationDataProvider)
+	resourceManager := controllers.NewResourceManager(providerRegistrationDataProvider, resourceDataProvider)
+
 	webService := new(restful.WebService)
 	webService.
 		Path(consts.SubscriptionsURLPrefix).
 		Consumes(restful.MIME_JSON).
 		Produces(restful.MIME_JSON)
-
-	providerRegistrationDataProvider := storage.NewProviderRegistrationDataProvider(consts.StorageDatabase, consts.StoragePassword)
-	resourceDataProvider := storage.NewResourceDataProvider(consts.StorageDatabase, consts.StoragePassword)
-	providerRegistrationManager := controllers.NewProviderRegistrationManager(providerRegistrationDataProvider)
-	resourceManager := controllers.NewResourceManager(providerRegistrationDataProvider, resourceDataProvider)
 
 	addSubscriptionOperationRoutes(webService)
 	addProvidersOperationRoutes(webService, providerRegistrationManager)
