@@ -7,6 +7,7 @@ package main
 import (
 	"TFRP/pkg/core/consts"
 	"TFRP/pkg/core/controllers"
+	"TFRP/pkg/core/storage"
 	"log"
 	"net/http"
 
@@ -37,17 +38,22 @@ func initRoutes() {
 		Consumes(restful.MIME_JSON).
 		Produces(restful.MIME_JSON)
 
+	providerRegistrationDataProvider := storage.NewProviderRegistrationDataProvider(consts.StorageDatabase, consts.StoragePassword)
+	resourceDataProvider := storage.NewResourceDataProvider(consts.StorageDatabase, consts.StoragePassword)
+	providerRegistrationManager := controllers.NewProviderRegistrationManager(providerRegistrationDataProvider)
+	resourceManager := controllers.NewResourceManager(providerRegistrationDataProvider, resourceDataProvider)
+
 	addSubscriptionOperationRoutes(webService)
-	addProvidersOperationRoutes(webService)
-	addResourcesOperationRoutes(webService)
+	addProvidersOperationRoutes(webService, providerRegistrationManager)
+	addResourcesOperationRoutes(webService, resourceManager)
 
 	restful.Add(webService)
 }
 
-func addProvidersOperationRoutes(webService *restful.WebService) {
+func addProvidersOperationRoutes(webService *restful.WebService, providerRegistrationManager *controllers.ProviderRegistrationManager) {
 	webService.Route(webService.
 		GET(consts.ProviderRegistrationOperationRoute).
-		To(controllers.GetProviderRegistrationController).
+		To(providerRegistrationManager.GetProviderRegistrationController).
 		Doc("Get a provider registration").
 		Operation(consts.GetProviderRegistrationControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -57,7 +63,7 @@ func addProvidersOperationRoutes(webService *restful.WebService) {
 
 	webService.Route(webService.
 		PUT(consts.ProviderRegistrationOperationRoute).
-		To(controllers.PutProviderRegistrationController).
+		To(providerRegistrationManager.PutProviderRegistrationController).
 		Doc("Create/update a provider registration").
 		Operation(consts.PutProviderRegistrationControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -67,7 +73,7 @@ func addProvidersOperationRoutes(webService *restful.WebService) {
 
 	webService.Route(webService.
 		DELETE(consts.ProviderRegistrationOperationRoute).
-		To(controllers.DeleteProviderRegistrationController).
+		To(providerRegistrationManager.DeleteProviderRegistrationController).
 		Doc("Delete a provider registration").
 		Operation(consts.DeleteProviderRegistrationControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -76,10 +82,10 @@ func addProvidersOperationRoutes(webService *restful.WebService) {
 		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
 }
 
-func addResourcesOperationRoutes(webService *restful.WebService) {
+func addResourcesOperationRoutes(webService *restful.WebService, resourceManager *controllers.ResourceManager) {
 	webService.Route(webService.
 		GET(consts.ResourceOperationRoute).
-		To(controllers.GetResourceController).
+		To(resourceManager.GetResourceController).
 		Doc("Get a resource").
 		Operation(consts.GetResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -89,7 +95,7 @@ func addResourcesOperationRoutes(webService *restful.WebService) {
 
 	webService.Route(webService.
 		PUT(consts.ResourceOperationRoute).
-		To(controllers.PutResourceController).
+		To(resourceManager.PutResourceController).
 		Doc("Create/update a resource").
 		Operation(consts.PutResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
@@ -99,7 +105,7 @@ func addResourcesOperationRoutes(webService *restful.WebService) {
 
 	webService.Route(webService.
 		DELETE(consts.ResourceOperationRoute).
-		To(controllers.DeleteResourceController).
+		To(resourceManager.DeleteResourceController).
 		Doc("Delete a resource").
 		Operation(consts.DeleteResourceControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).

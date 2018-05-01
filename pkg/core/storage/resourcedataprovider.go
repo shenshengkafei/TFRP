@@ -13,30 +13,28 @@ import (
 
 // ResourceDataProvider is the base struc of all data provider
 type ResourceDataProvider struct {
-	baseDataProvider BaseDataProvider
+	BaseDataProvider
 }
 
-// GetResourceDataProvider returns the resource data provider
-func GetResourceDataProvider() *ResourceDataProvider {
-	return &ResourceDataProvider{
-		baseDataProvider: BaseDataProvider{
-			Database: consts.StorageDatabase,
-			Password: consts.StoragePassword,
-		},
-	}
+// NewResourceDataProvider creates a new resource data provider
+func NewResourceDataProvider(database, password string) (resourceDataProvider *ResourceDataProvider) {
+	resourceDataProvider = new(ResourceDataProvider)
+	resourceDataProvider.Database = database
+	resourceDataProvider.Password = password
+	return resourceDataProvider
 }
 
-// Insert inserts a doc into collection
-func (resourceDataProvider *ResourceDataProvider) Insert(doc *entities.ResourcePackage) error {
-	return resourceDataProvider.baseDataProvider.Insert(consts.ResourceCollectionName, bson.M{"resourceid": doc.ResourceID}, doc)
+// InsertPackage inserts a doc into collection
+func (resourceDataProvider *ResourceDataProvider) InsertPackage(doc *entities.ResourcePackage) error {
+	return resourceDataProvider.Insert(consts.ResourceCollectionName, bson.M{"resourceid": doc.ResourceID}, doc)
 }
 
-// Find returns a doc from colletion
-func (resourceDataProvider *ResourceDataProvider) Find(resourceID string, result interface{}) error {
-	return resourceDataProvider.baseDataProvider.Find(consts.ResourceCollectionName, bson.M{"resourceid": resourceID}, result)
+// FindPackage returns a doc from colletion
+func (resourceDataProvider *ResourceDataProvider) FindPackage(resourceID string, result interface{}) error {
+	return resourceDataProvider.Find(consts.ResourceCollectionName, bson.M{"resourceid": resourceID}, result)
 }
 
-// Remove deletes a doc from collection
-func (resourceDataProvider *ResourceDataProvider) Remove(resourceID string) error {
-	return resourceDataProvider.baseDataProvider.Remove(consts.ResourceCollectionName, bson.M{"resourceid": resourceID})
+// RemovePackage deletes a doc from collection
+func (resourceDataProvider *ResourceDataProvider) RemovePackage(resourceID string) error {
+	return resourceDataProvider.Remove(consts.ResourceCollectionName, bson.M{"resourceid": resourceID})
 }

@@ -23,13 +23,25 @@ import (
 	restful "github.com/emicklei/go-restful"
 )
 
+// ProviderRegistrationManager is the provider registeration manager
+type ProviderRegistrationManager struct {
+	BaseHandler
+}
+
+// NewProviderRegistrationManager create a new provider registration manager
+func NewProviderRegistrationManager(providerRegistrationDataProvider *storage.ProviderRegistrationDataProvider) (providerRegistrationManager *ProviderRegistrationManager) {
+	providerRegistrationManager = new(ProviderRegistrationManager)
+	providerRegistrationManager.ProviderRegistrationDataProvider = providerRegistrationDataProvider
+	return providerRegistrationManager
+}
+
 // GetProviderRegistrationController returns a provider registration
-func GetProviderRegistrationController(request *restful.Request, response *restful.Response) {
+func (providerRegistrationManager *ProviderRegistrationManager) GetProviderRegistrationController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
 
 	// Get Document from collection
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
-	err := storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
+	err := providerRegistrationManager.ProviderRegistrationDataProvider.FindPackage(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -55,7 +67,7 @@ func GetProviderRegistrationController(request *restful.Request, response *restf
 }
 
 // PutProviderRegistrationController create a new provider registration
-func PutProviderRegistrationController(request *restful.Request, response *restful.Response) {
+func (providerRegistrationManager *ProviderRegistrationManager) PutProviderRegistrationController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
 
 	providerRegistrationDefinition := entities.ProviderRegistrationDefinition{}
@@ -107,7 +119,7 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 
 	fmt.Printf("%s", string(credentials))
 	// insert Document in collection
-	err = storage.GetProviderRegistrationDataProvider().Insert(&entities.ProviderRegistrationPackage{
+	err = providerRegistrationManager.ProviderRegistrationDataProvider.InsertPackage(&entities.ProviderRegistrationPackage{
 		ResourceID:   fullyQualifiedResourceID,
 		ProviderType: providerRegistrationDefinition.Properties.ProviderType,
 		Credentials:  credentials,
@@ -125,7 +137,7 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 
 	// Get Document from collection
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
-	err = storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
+	err = providerRegistrationManager.ProviderRegistrationDataProvider.FindPackage(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -152,12 +164,12 @@ func PutProviderRegistrationController(request *restful.Request, response *restf
 }
 
 // DeleteProviderRegistrationController removes a provider registration
-func DeleteProviderRegistrationController(request *restful.Request, response *restful.Response) {
+func (providerRegistrationManager *ProviderRegistrationManager) DeleteProviderRegistrationController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
 
 	// Get Document from collection
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
-	err := storage.GetProviderRegistrationDataProvider().Find(fullyQualifiedResourceID, &providerRegistrationPackage)
+	err := providerRegistrationManager.ProviderRegistrationDataProvider.FindPackage(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -168,7 +180,7 @@ func DeleteProviderRegistrationController(request *restful.Request, response *re
 		return
 	}
 
-	err = storage.GetProviderRegistrationDataProvider().Remove(fullyQualifiedResourceID)
+	err = providerRegistrationManager.ProviderRegistrationDataProvider.RemovePackage(fullyQualifiedResourceID)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,

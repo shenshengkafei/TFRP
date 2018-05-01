@@ -19,13 +19,28 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
+// ResourceManager is the resource manager
+type ResourceManager struct {
+	BaseHandler
+}
+
+// NewResourceManager create a new resource manager
+func NewResourceManager(
+	providerRegistrationDataProvider *storage.ProviderRegistrationDataProvider,
+	resourceDataProvider *storage.ResourceDataProvider) (resourceManager *ResourceManager) {
+	resourceManager = new(ResourceManager)
+	resourceManager.ProviderRegistrationDataProvider = providerRegistrationDataProvider
+	resourceManager.ResourceDataProvider = resourceDataProvider
+	return resourceManager
+}
+
 // GetResourceController returns a resource
-func GetResourceController(request *restful.Request, response *restful.Response) {
+func (resourceManager *ResourceManager) GetResourceController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 	// Get Document from collection
 	resourcePackage := entities.ResourcePackage{}
-	err := storage.GetResourceDataProvider().Find(fullyQualifiedResourceID, &resourcePackage)
+	err := resourceManager.ResourceDataProvider.FindPackage(fullyQualifiedResourceID, &resourcePackage)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -82,7 +97,7 @@ func GetResourceController(request *restful.Request, response *restful.Response)
 	resourcePackage.State = resourceState
 
 	// insert Document in collection
-	err = storage.GetResourceDataProvider().Insert(&resourcePackage)
+	err = resourceManager.ResourceDataProvider.InsertPackage(&resourcePackage)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -109,7 +124,7 @@ func GetResourceController(request *restful.Request, response *restful.Response)
 }
 
 // PutResourceController creates/updates a resource
-func PutResourceController(request *restful.Request, response *restful.Response) {
+func (resourceManager *ResourceManager) PutResourceController(request *restful.Request, response *restful.Response) {
 	resourceDefinition := entities.ResourceDefinition{}
 
 	rawBody, err := ioutil.ReadAll(request.Request.Body)
@@ -136,7 +151,7 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 
 	// Get Document from collection
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
-	err = storage.GetProviderRegistrationDataProvider().Find(resourceDefinition.Properties.ProviderID, &providerRegistrationPackage)
+	err = resourceManager.ProviderRegistrationDataProvider.FindPackage(resourceDefinition.Properties.ProviderID, &providerRegistrationPackage)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -226,7 +241,7 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 		fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 		// insert Document in collection
-		err = storage.GetResourceDataProvider().Insert(&entities.ResourcePackage{
+		err = resourceManager.ResourceDataProvider.InsertPackage(&entities.ResourcePackage{
 			ResourceID:   fullyQualifiedResourceID,
 			StateID:      resourceState.ID,
 			State:        resourceState,
@@ -261,12 +276,12 @@ func PutResourceController(request *restful.Request, response *restful.Response)
 }
 
 // DeleteResourceController deletes a resource
-func DeleteResourceController(request *restful.Request, response *restful.Response) {
+func (resourceManager *ResourceManager) DeleteResourceController(request *restful.Request, response *restful.Response) {
 	fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 	// Get Document from collection
 	resourcePackage := entities.ResourcePackage{}
-	err := storage.GetResourceDataProvider().Find(fullyQualifiedResourceID, &resourcePackage)
+	err := resourceManager.ResourceDataProvider.FindPackage(fullyQualifiedResourceID, &resourcePackage)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -324,7 +339,7 @@ func DeleteResourceController(request *restful.Request, response *restful.Respon
 	}
 
 	if resourceState == nil {
-		err := storage.GetResourceDataProvider().Remove(fullyQualifiedResourceID)
+		err := resourceManager.ResourceDataProvider.RemovePackage(fullyQualifiedResourceID)
 		if err != nil {
 			apierror.WriteErrorToResponse(
 				response,
