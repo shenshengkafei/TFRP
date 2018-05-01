@@ -37,6 +37,7 @@ func initRoutes() {
 		Consumes(restful.MIME_JSON).
 		Produces(restful.MIME_JSON)
 
+	addSubscriptionOperationRoutes(webService)
 	addProvidersOperationRoutes(webService)
 	addResourcesOperationRoutes(webService)
 
