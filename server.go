@@ -106,3 +106,20 @@ func addResourcesOperationRoutes(webService *restful.WebService) {
 		Param(webService.PathParameter(consts.PathResourceNameParameter, "Name of resource").DataType("string")).
 		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
 }
+
+func addSubscriptionOperationRoutes(webService *restful.WebService) {
+	// Subscription operations
+	webService.Route(webService.
+		GET(consts.SubscriptionResourceOperationRoute).
+		To(controllers.GetSubscriptionOperationController).
+		Doc("get a subscription").
+		Operation(consts.GetSubscriptionControllerName).
+		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "identifier of the subscription").DataType("string")))
+
+	webService.Route(webService.
+		PUT(consts.SubscriptionResourceOperationRoute).
+		To(controllers.PutSubscriptionOperationController).
+		Doc("Put or update a subscription").
+		Operation(consts.PutSubscriptionControllerName).
+		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "identifier of the subscription").DataType("string")))
+}

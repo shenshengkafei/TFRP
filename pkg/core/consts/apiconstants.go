@@ -90,4 +90,9 @@ const (
 	PutProviderRegistrationControllerName = "PutProviderRegistrationController"
 	// DeleteProviderRegistrationControllerName is the constant logged for delete provider registration calls
 	DeleteProviderRegistrationControllerName = "DeleteProviderRegistrationController"
+
+	// GetSubscriptionControllerName is the constant logged for get subscription calls
+	GetSubscriptionControllerName
+	// PutSubscriptionControllerName is the constant logged for put subscription calls
+	PutSubscriptionControllerName
 )
