@@ -9,9 +9,9 @@ import "gopkg.in/mgo.v2/bson"
 // ProviderRegistrationPackage is the package stored in storage
 type ProviderRegistrationPackage struct {
 	ID           bson.ObjectId `bson:"_id,omitempty"`
-	ResourceID   string
-	ProviderType string
-	Settings     []byte
+	ResourceID   string        `json:",omitempty"`
+	ProviderType string        `json:",omitempty"`
+	Settings     []byte        `json:",omitempty"`
 }
 
 // ProviderRegistrationPackageDefinition is the package definition

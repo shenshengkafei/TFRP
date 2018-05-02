@@ -12,12 +12,12 @@ import (
 // ResourcePackage is the package stored in storag
 type ResourcePackage struct {
 	ID           bson.ObjectId `bson:"_id,omitempty"`
-	ResourceID   string
-	StateID      string
+	ResourceID   string        `json:",omitempty"`
+	StateID      string        `json:",omitempty"`
 	State        *terraform.InstanceState
-	Config       string
-	ResourceType string
-	ProviderType string
+	Config       string `json:",omitempty"`
+	ResourceType string `json:",omitempty"`
+	ProviderType string `json:",omitempty"`
 }
 
 // ResourcePackageDefinition is the package definition
