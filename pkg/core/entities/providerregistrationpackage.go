@@ -11,17 +11,30 @@ type ProviderRegistrationPackage struct {
 	ID           bson.ObjectId `bson:"_id,omitempty"`
 	ResourceID   string
 	ProviderType string
-	Credentials  []byte
+	Settings     []byte
 }
 
 // ProviderRegistrationPackageDefinition is the package definition
 type ProviderRegistrationPackageDefinition struct {
-	Properties interface{}
+	Properties ProviderRegistrationPackage
 }
 
 // ToDefinition returns the definition
 func (providerRegistrationPackage *ProviderRegistrationPackage) ToDefinition() *ProviderRegistrationPackageDefinition {
 	return &ProviderRegistrationPackageDefinition{
-		Properties: providerRegistrationPackage,
+		Properties: ProviderRegistrationPackage{
+			ID:           providerRegistrationPackage.ID,
+			ResourceID:   providerRegistrationPackage.ResourceID,
+			ProviderType: providerRegistrationPackage.ProviderType,
+		},
+	}
+}
+
+// ToListSettingsDefinition returns the definition
+func (providerRegistrationPackage *ProviderRegistrationPackage) ToListSettingsDefinition() *ProviderRegistrationPackageDefinition {
+	return &ProviderRegistrationPackageDefinition{
+		Properties: ProviderRegistrationPackage{
+			Settings: providerRegistrationPackage.Settings,
+		},
 	}
 }

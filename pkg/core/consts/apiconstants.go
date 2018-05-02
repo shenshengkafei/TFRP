@@ -30,7 +30,7 @@ const (
 	ContainersLiteral            = "{co:(?i)containers}"
 	UnderlaysLiteral             = "{un:(?i)underlays}"
 	DefaultLiteral               = "{up:(?i)default}"
-	ListCredentialLiteral        = "{li:(?i)listcredential}"
+	ListSettingsLiteral          = "{li:(?i)listsettings}"
 )
 
 const (
@@ -74,6 +74,13 @@ const (
 		PathResourceGroupNameParameter +
 		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + ProviderRegistrationsLiteral + "/{" +
 		PathProviderRegistrationParameter + "}"
+
+	// ProviderRegistrationListSettingsRoute is the route used to perform POST on one provider registration settings
+	// /{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.TerraformOSS/providerregistrations/{providerRegistration}/listsettings
+	ProviderRegistrationListSettingsRoute = SubscriptionResourceOperationRoute + "/" + ResourceGroupsLiteral + "/{" +
+		PathResourceGroupNameParameter +
+		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + ProviderRegistrationsLiteral + "/{" +
+		PathProviderRegistrationParameter + "}" + "/" + ListSettingsLiteral
 )
 
 const (
@@ -90,6 +97,9 @@ const (
 	PutProviderRegistrationControllerName = "PutProviderRegistrationController"
 	// DeleteProviderRegistrationControllerName is the constant logged for delete provider registration calls
 	DeleteProviderRegistrationControllerName = "DeleteProviderRegistrationController"
+
+	// PostProviderRegistrationListSettingsControllerName is the constant logged for post provider registration settings calls
+	PostProviderRegistrationListSettingsControllerName = "PostProviderRegistrationListSettingsController"
 
 	// GetSubscriptionControllerName is the constant logged for get subscription calls
 	GetSubscriptionControllerName

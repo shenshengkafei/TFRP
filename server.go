@@ -26,12 +26,12 @@ var (
 func main() {
 	pflag.Parse()
 
-	// secretEngine := &engines.SecretEngine{
-	// 	TenantID:     "72f988bf-86f1-41af-91ab-2d7cd011db47",
-	// 	ClientID:     "962c0e07-48bc-4e30-b5fe-b95c11fe486c",
-	// 	ClientSecret: "c5c8960e1119c4e0f944",
-	// }
-	secretEngine := engines.GetSecretEngine()
+	secretEngine := &engines.SecretEngine{
+		TenantID:     "72f988bf-86f1-41af-91ab-2d7cd011db47",
+		ClientID:     "962c0e07-48bc-4e30-b5fe-b95c11fe486c",
+		ClientSecret: "c5c8960e1119c4e0f944",
+	}
+	// secretEngine := engines.GetSecretEngine()
 
 	initRoutes(secretEngine)
 
@@ -63,7 +63,6 @@ func getTLSConfig(secretEngine *engines.SecretEngine) (config *tls.Config) {
 	// https://requirements.azurewebsites.net/Requirements/Details/6417#guide
 	// they have to follow the order in above requirement page
 	tlsConfig.CipherSuites = []uint16{
-
 		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
@@ -124,6 +123,16 @@ func addProvidersOperationRoutes(webService *restful.WebService, providerRegistr
 		To(providerRegistrationManager.DeleteProviderRegistrationController).
 		Doc("Delete a provider registration").
 		Operation(consts.DeleteProviderRegistrationControllerName).
+		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
+		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
+		Param(webService.PathParameter(consts.PathProviderRegistrationParameter, "Name of provider registration").DataType("string")).
+		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
+
+	webService.Route(webService.
+		POST(consts.ProviderRegistrationListSettingsRoute).
+		To(providerRegistrationManager.PostProviderRegistrationListSettings).
+		Doc("Get settings of a provider registration").
+		Operation(consts.PostProviderRegistrationListSettingsControllerName).
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
 		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
 		Param(webService.PathParameter(consts.PathProviderRegistrationParameter, "Name of provider registration").DataType("string")).

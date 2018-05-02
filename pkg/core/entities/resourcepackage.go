@@ -22,12 +22,20 @@ type ResourcePackage struct {
 
 // ResourcePackageDefinition is the package definition
 type ResourcePackageDefinition struct {
-	Properties interface{}
+	Properties ResourcePackage
 }
 
 // ToDefinition returns the definition
 func (resourcePackage *ResourcePackage) ToDefinition() *ResourcePackageDefinition {
+	resourcePackage.Config = ""
 	return &ResourcePackageDefinition{
-		Properties: resourcePackage,
+		Properties: ResourcePackage{
+			ID:           resourcePackage.ID,
+			ResourceID:   resourcePackage.ResourceID,
+			StateID:      resourcePackage.StateID,
+			State:        resourcePackage.State,
+			ResourceType: resourcePackage.ResourceType,
+			ProviderType: resourcePackage.ProviderType,
+		},
 	}
 }

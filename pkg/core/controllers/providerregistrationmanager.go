@@ -9,16 +9,13 @@ package controllers
 
 import (
 	"TFRP/pkg/core/apierror"
-	"TFRP/pkg/core/consts"
 	"TFRP/pkg/core/engines"
 	"TFRP/pkg/core/entities"
 	"TFRP/pkg/core/storage"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"strings"
 
 	restful "github.com/emicklei/go-restful"
 )
@@ -93,7 +90,7 @@ func (providerRegistrationManager *ProviderRegistrationManager) PutProviderRegis
 		return
 	}
 
-	credentials, err := json.Marshal(providerRegistrationDefinition.Properties.Settings)
+	settings, err := json.Marshal(providerRegistrationDefinition.Properties.Settings)
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
@@ -104,25 +101,12 @@ func (providerRegistrationManager *ProviderRegistrationManager) PutProviderRegis
 		return
 	}
 
-	if strings.EqualFold(consts.KubernetesProvider, providerRegistrationDefinition.Properties.ProviderType) {
-		credentials, err = getKubernetesProviderCredentials(providerRegistrationDefinition.Properties.Settings)
-		if err != nil {
-			apierror.WriteErrorToResponse(
-				response,
-				http.StatusInternalServerError,
-				apierror.InternalError,
-				apierror.InternalOperationError,
-				fmt.Sprintf("Failed to get Kubernetes provider credentials: %s", err.Error()))
-			return
-		}
-	}
-
-	fmt.Printf("%s", string(credentials))
+	fmt.Printf("%s", string(settings))
 	// insert Document in collection
 	err = providerRegistrationManager.ProviderRegistrationDataProvider.InsertPackage(&entities.ProviderRegistrationPackage{
 		ResourceID:   fullyQualifiedResourceID,
 		ProviderType: providerRegistrationDefinition.Properties.ProviderType,
-		Credentials:  credentials,
+		Settings:     settings,
 	})
 
 	if err != nil {
@@ -194,32 +178,33 @@ func (providerRegistrationManager *ProviderRegistrationManager) DeleteProviderRe
 	response.WriteHeader(http.StatusOK)
 }
 
-func getKubernetesProviderCredentials(credentials interface{}) ([]byte, error) {
-	kubeCredentials := &entities.KubernetesProviderCredential{}
+// PostProviderRegistrationListSettings returns settings of a provider registration
+func (providerRegistrationManager *ProviderRegistrationManager) PostProviderRegistrationListSettings(request *restful.Request, response *restful.Response) {
+	fullyQualifiedResourceID := engines.GetFullyQualifiedProviderRegistrationID(request)
 
-	byteData, err := json.Marshal(credentials)
+	// Get Document from collection
+	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
+	err := providerRegistrationManager.ProviderRegistrationDataProvider.FindPackage(fullyQualifiedResourceID, &providerRegistrationPackage)
 	if err != nil {
-		return nil, err
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusNotFound,
+			apierror.ClientError,
+			apierror.NotFound,
+			err.Error())
+		return
 	}
 
-	err = json.Unmarshal(byteData, &kubeCredentials)
+	responseContent, err := json.Marshal(providerRegistrationPackage.ToListSettingsDefinition())
 	if err != nil {
-		return nil, err
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusInternalServerError,
+			apierror.InternalError,
+			apierror.InternalOperationError,
+			fmt.Sprintf("Failed to serialize provider registration package: %s", err.Error()))
+		return
 	}
-
-	decodedConfig, err := base64.StdEncoding.DecodeString(kubeCredentials.InlineConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	decodedKubeCredentials := &entities.KubernetesProviderCredential{
-		InlineConfig: string(decodedConfig),
-	}
-
-	result, err := json.Marshal(decodedKubeCredentials)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+	response.Write(responseContent)
 }

@@ -175,7 +175,7 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 
 	configFile := getConfigFileInJSON(
 		providerRegistrationPackage.ProviderType,
-		providerRegistrationPackage.Credentials,
+		providerRegistrationPackage.Settings,
 		resourceDefinition,
 		engines.GetResourceName(request), resourceSpec)
 	fmt.Printf("%s", configFile)
