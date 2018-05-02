@@ -47,15 +47,11 @@ func GetSecretEngine() (secretEngine *SecretEngine) {
 	secretEngine.ClientID = string(clientID)
 	secretEngine.ClientSecret = string(clientSecret)
 
-	fmt.Printf("tenant %s", secretEngine.TenantID)
-	fmt.Printf("clientID %s", secretEngine.ClientID)
-	fmt.Printf("clientsecret %s", secretEngine.ClientSecret)
-
 	return secretEngine
 }
 
 // GetSecretFromKeyVault returns a secret
-func (secretEngine *SecretEngine) GetSecretFromKeyVault(vaultBaseURI string, secretName string, secretVersion string) string {
+func (secretEngine *SecretEngine) GetSecretFromKeyVault(vaultBaseURI, secretName, secretVersion string) string {
 	fmt.Printf("uri %s", vaultBaseURI)
 	fmt.Printf("name %s", secretName)
 	fmt.Printf("version %s", secretVersion)
@@ -63,10 +59,6 @@ func (secretEngine *SecretEngine) GetSecretFromKeyVault(vaultBaseURI string, sec
 	tenantID := secretEngine.TenantID
 	clientID := secretEngine.ClientID
 	clientSecret := secretEngine.ClientSecret
-
-	fmt.Printf("tenant %s", secretEngine.TenantID)
-	fmt.Printf("clientID %s", secretEngine.ClientID)
-	fmt.Printf("clientsecret %s", secretEngine.ClientSecret)
 
 	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, tenantID)
 	updatedAuthorizeEndpoint, err := url.Parse("https://login.windows.net/" + tenantID + "/oauth2/token")

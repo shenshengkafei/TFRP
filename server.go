@@ -9,6 +9,8 @@ import (
 	"TFRP/pkg/core/controllers"
 	"TFRP/pkg/core/engines"
 	"TFRP/pkg/core/storage"
+	"crypto/tls"
+	"encoding/base64"
 	"log"
 	"net/http"
 
@@ -24,15 +26,6 @@ var (
 func main() {
 	pflag.Parse()
 
-	initRoutes()
-
-	go func() {
-		go log.Fatal(http.ListenAndServe(":8080", nil))
-	}()
-	log.Fatal(http.ListenAndServeTLS(":443", "fullchain.pem", "privkey.pem", nil))
-}
-
-func initRoutes() {
 	// secretEngine := &engines.SecretEngine{
 	// 	TenantID:     "72f988bf-86f1-41af-91ab-2d7cd011db47",
 	// 	ClientID:     "962c0e07-48bc-4e30-b5fe-b95c11fe486c",
@@ -40,6 +33,52 @@ func initRoutes() {
 	// }
 	secretEngine := engines.GetSecretEngine()
 
+	initRoutes(secretEngine)
+
+	httpServer := &http.Server{
+		Addr:      ":443",
+		TLSConfig: getTLSConfig(secretEngine),
+	}
+
+	go func() {
+		go log.Fatal(http.ListenAndServe(":8080", nil))
+	}()
+	log.Fatal(httpServer.ListenAndServeTLS("", ""))
+}
+
+func getTLSConfig(secretEngine *engines.SecretEngine) (config *tls.Config) {
+	certPem, err := base64.StdEncoding.DecodeString(secretEngine.GetSecretFromKeyVault(consts.SslCertKVBaseURI, consts.SslCertKVSecretName, consts.SslCertKVSecretVersion))
+	keyPem, err := base64.StdEncoding.DecodeString(secretEngine.GetSecretFromKeyVault(consts.SslPrivatekeyKVBaseURI, consts.SslPrivatekeyKVSecretName, consts.SslPrivatekeyKVSecretVersion))
+	if err != nil {
+		log.Fatal("Failed to decode certs: %v", err)
+	}
+
+	cert, err := tls.X509KeyPair(certPem, keyPem)
+	if err != nil {
+		log.Fatal("Cannot load X509 key pair: %v", err)
+	}
+
+	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+	// ciphersuite requirements:
+	// https://requirements.azurewebsites.net/Requirements/Details/6417#guide
+	// they have to follow the order in above requirement page
+	tlsConfig.CipherSuites = []uint16{
+
+		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+	}
+	tlsConfig.PreferServerCipherSuites = true
+	tlsConfig.MinVersion = tls.VersionTLS12
+	tlsConfig.MaxVersion = tls.VersionTLS12
+
+	return tlsConfig
+}
+
+func initRoutes(secretEngine *engines.SecretEngine) {
 	storagePassword := secretEngine.GetSecretFromKeyVault(consts.StoragePasswordKVBaseURI, consts.StoragePasswordKVSecretName, consts.StoragePasswordKVSecretVersion)
 	providerRegistrationDataProvider := storage.NewProviderRegistrationDataProvider(consts.StorageDatabase, storagePassword)
 	resourceDataProvider := storage.NewResourceDataProvider(consts.StorageDatabase, storagePassword)
