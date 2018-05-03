@@ -149,6 +149,15 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 		return
 	}
 
+	validationError := engines.ValidateResourceDefinition(&resourceDefinition)
+	if validationError != nil {
+		apierror.WriteErrorToResponseWitAPIError(
+			response,
+			http.StatusBadRequest,
+			validationError)
+		return
+	}
+
 	// Get Document from collection
 	providerRegistrationPackage := entities.ProviderRegistrationPackage{}
 	err = resourceManager.ProviderRegistrationDataProvider.FindPackage(resourceDefinition.Properties.ProviderID, &providerRegistrationPackage)
@@ -233,7 +242,7 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 				http.StatusBadRequest,
 				apierror.ClientError,
 				apierror.BadRequest,
-				fmt.Sprintf("Failed to create resourse: %s", err))
+				fmt.Sprintf("Failed to create resource: %s", err))
 			return
 		}
 		fmt.Printf("%s", resourceState.ID)

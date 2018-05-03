@@ -24,7 +24,7 @@ func ValidateProviderRegistrationDefinition(providerRegistrationDefinition *enti
 		return apierror.New(
 			apierror.ClientError,
 			apierror.BadRequest,
-			fmt.Sprintf("Request content is missing property 'providerType'."))
+			fmt.Sprintf("Request content is missing property 'ProviderType'."))
 	}
 
 	supportedProviders := []string{consts.KubernetesProvider, consts.DatadogProvider, consts.CloudflareProvider}
@@ -41,6 +41,24 @@ func ValidateProviderRegistrationDefinition(providerRegistrationDefinition *enti
 			apierror.ClientError,
 			apierror.BadRequest,
 			fmt.Sprintf("The provider type %s is not supported. Supported providers are %s.", providerRegistrationDefinition.Properties.ProviderType, supportedProviders))
+	}
+
+	return nil
+}
+
+// ValidateResourceDefinition validates the resource definition
+func ValidateResourceDefinition(resourceDefinition *entities.ResourceDefinition) *apierror.ErrorResponse {
+	if resourceDefinition.Properties == nil {
+		return apierror.New(
+			apierror.ClientError,
+			apierror.BadRequest,
+			fmt.Sprintf("Request content is missing properties."))
+	}
+	if len(strings.TrimSpace(resourceDefinition.Properties.ResourceType)) == 0 {
+		return apierror.New(
+			apierror.ClientError,
+			apierror.BadRequest,
+			fmt.Sprintf("Request content is missing property 'ResourceType'."))
 	}
 
 	return nil

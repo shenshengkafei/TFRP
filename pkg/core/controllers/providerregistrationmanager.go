@@ -102,12 +102,12 @@ func (providerRegistrationManager *ProviderRegistrationManager) PutProviderRegis
 		return
 	}
 
-	apierr := engines.ValidateProviderRegistrationDefinition(&providerRegistrationDefinition)
-	if apierr != nil {
+	validationError := engines.ValidateProviderRegistrationDefinition(&providerRegistrationDefinition)
+	if validationError != nil {
 		apierror.WriteErrorToResponseWitAPIError(
 			response,
 			http.StatusBadRequest,
-			apierr)
+			validationError)
 		return
 	}
 
