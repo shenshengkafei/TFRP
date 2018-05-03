@@ -7,7 +7,7 @@ package entities
 // ResourceDefinition is the resource definition
 type ResourceDefinition struct {
 	Location   string
-	Properties ResourceDefinitionProperties
+	Properties *ResourceDefinitionProperties
 }
 
 // ResourceDefinitionProperties is the resouce definition properties

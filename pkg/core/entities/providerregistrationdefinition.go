@@ -7,7 +7,7 @@ package entities
 // ProviderRegistrationDefinition is provider registration definition
 type ProviderRegistrationDefinition struct {
 	Location   string
-	Properties PoviderRegistrationProperties
+	Properties *PoviderRegistrationProperties
 }
 
 // PoviderRegistrationProperties is provider registration properties

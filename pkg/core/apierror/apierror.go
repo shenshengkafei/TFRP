@@ -23,3 +23,9 @@ func WriteErrorToResponse(resp *restful.Response, httpStatus int, errorCategory 
 	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
 	resp.WriteError(httpStatus, err)
 }
+
+// WriteErrorToResponseWitAPIError writes an ErrorResponse
+func WriteErrorToResponseWitAPIError(resp *restful.Response, httpStatus int, errorResponse *ErrorResponse) {
+	resp.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+	resp.WriteError(httpStatus, errorResponse)
+}

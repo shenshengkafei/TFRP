@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 
 	restful "github.com/emicklei/go-restful"
 )
@@ -72,10 +73,10 @@ func (providerRegistrationManager *ProviderRegistrationManager) PutProviderRegis
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
-			http.StatusInternalServerError,
-			apierror.InternalError,
-			apierror.InternalOperationError,
-			fmt.Sprintf("Failed to read request content: %s", err.Error()))
+			http.StatusBadRequest,
+			apierror.ClientError,
+			apierror.BadRequest,
+			fmt.Sprintf("The request body is invalid: %s", err.Error()))
 		return
 	}
 
@@ -83,9 +84,9 @@ func (providerRegistrationManager *ProviderRegistrationManager) PutProviderRegis
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
-			http.StatusInternalServerError,
-			apierror.InternalError,
-			apierror.InternalOperationError,
+			http.StatusBadRequest,
+			apierror.ClientError,
+			apierror.BadRequest,
 			fmt.Sprintf("Failed to deserialize request content: %s", err.Error()))
 		return
 	}
@@ -101,11 +102,20 @@ func (providerRegistrationManager *ProviderRegistrationManager) PutProviderRegis
 		return
 	}
 
+	apierr := engines.ValidateProviderRegistrationDefinition(&providerRegistrationDefinition)
+	if apierr != nil {
+		apierror.WriteErrorToResponseWitAPIError(
+			response,
+			http.StatusBadRequest,
+			apierr)
+		return
+	}
+
 	fmt.Printf("%s", string(settings))
 	// insert Document in collection
 	err = providerRegistrationManager.ProviderRegistrationDataProvider.InsertPackage(&entities.ProviderRegistrationPackage{
 		ResourceID:   fullyQualifiedResourceID,
-		ProviderType: providerRegistrationDefinition.Properties.ProviderType,
+		ProviderType: strings.ToLower(providerRegistrationDefinition.Properties.ProviderType),
 		Settings:     settings,
 	})
 

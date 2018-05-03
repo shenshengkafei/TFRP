@@ -27,7 +27,6 @@ type ResourcePackageDefinition struct {
 
 // ToDefinition returns the definition
 func (resourcePackage *ResourcePackage) ToDefinition() *ResourcePackageDefinition {
-	resourcePackage.Config = ""
 	return &ResourcePackageDefinition{
 		Properties: ResourcePackage{
 			ID:           resourcePackage.ID,
