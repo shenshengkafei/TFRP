@@ -131,10 +131,10 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
-			http.StatusInternalServerError,
-			apierror.InternalError,
-			apierror.InternalOperationError,
-			fmt.Sprintf("Failed to read request content: %s", err))
+			http.StatusBadRequest,
+			apierror.ClientError,
+			apierror.BadRequest,
+			fmt.Sprintf("Request content is invalid: %s", err))
 		return
 	}
 
@@ -142,10 +142,10 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,
-			http.StatusInternalServerError,
-			apierror.InternalError,
-			apierror.InternalOperationError,
-			fmt.Sprintf("Failed to deserialize request content: %s", err))
+			http.StatusBadRequest,
+			apierror.ClientError,
+			apierror.BadRequest,
+			fmt.Sprintf("Request content cannot be deserialized as JSON: %s", err))
 		return
 	}
 
@@ -202,6 +202,17 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 		return
 	}
 
+	err = cfg.Validate()
+	if err != nil {
+		apierror.WriteErrorToResponse(
+			response,
+			http.StatusBadRequest,
+			apierror.ClientError,
+			apierror.BadRequest,
+			fmt.Sprintf("Invalid config file: %s", err))
+		return
+	}
+
 	// Init provider
 	for _, v := range cfg.ProviderConfigs {
 		err = provider.Configure(terraform.NewResourceConfig(v.RawConfig))
@@ -221,6 +232,17 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 	}
 
 	for _, v := range cfg.Resources {
+		_, errs := provider.ValidateResource(resourceDefinition.Properties.ResourceType, terraform.NewResourceConfig(v.RawConfig))
+		if errs != nil {
+			apierror.WriteErrorToResponse(
+				response,
+				http.StatusBadRequest,
+				apierror.ClientError,
+				apierror.BadRequest,
+				fmt.Sprintf("The resource settings are invalid: %s", errs))
+			return
+		}
+
 		state := new(terraform.InstanceState)
 		state.Init()
 		diff, err := provider.Diff(info, state, terraform.NewResourceConfig(v.RawConfig))
@@ -245,7 +267,6 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 				fmt.Sprintf("Failed to create resource: %s", err))
 			return
 		}
-		fmt.Printf("%s", resourceState.ID)
 
 		fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
