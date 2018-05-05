@@ -125,6 +125,7 @@ func (resourceManager *ResourceManager) GetResourceController(request *restful.R
 
 // PutResourceController creates/updates a resource
 func (resourceManager *ResourceManager) PutResourceController(request *restful.Request, response *restful.Response) {
+	fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 	resourceDefinition := entities.ResourceDefinition{}
 
 	rawBody, err := ioutil.ReadAll(request.Request.Body)
@@ -245,6 +246,13 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 
 		state := new(terraform.InstanceState)
 		state.Init()
+		// Get Document from collection
+		resourcePackage := entities.ResourcePackage{}
+		err := resourceManager.ResourceDataProvider.FindPackage(fullyQualifiedResourceID, &resourcePackage)
+		if err == nil && resourcePackage.State != nil {
+			state = resourcePackage.State
+		}
+
 		diff, err := provider.Diff(info, state, terraform.NewResourceConfig(v.RawConfig))
 		if err != nil {
 			apierror.WriteErrorToResponse(
@@ -253,6 +261,24 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 				apierror.ClientError,
 				apierror.BadRequest,
 				fmt.Sprintf("Failed to call provider diff: %s", err))
+			return
+		}
+
+		// If we have no diff, we have nothing to do!
+		if diff.Empty() {
+			responseContent, err := json.Marshal(resourceDefinition)
+			if err != nil {
+				apierror.WriteErrorToResponse(
+					response,
+					http.StatusInternalServerError,
+					apierror.InternalError,
+					apierror.InternalOperationError,
+					fmt.Sprintf("Failed to serialize response content: %s", err))
+				return
+			}
+
+			response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
+			response.Write(responseContent)
 			return
 		}
 
@@ -267,8 +293,6 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 				fmt.Sprintf("Failed to create resource: %s", err))
 			return
 		}
-
-		fullyQualifiedResourceID := engines.GetFullyQualifiedResourceID(request)
 
 		// insert Document in collection
 		err = resourceManager.ResourceDataProvider.InsertPackage(&entities.ResourcePackage{
