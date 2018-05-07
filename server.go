@@ -26,12 +26,7 @@ var (
 func main() {
 	pflag.Parse()
 
-	secretEngine := &engines.SecretEngine{
-		TenantID:     "72f988bf-86f1-41af-91ab-2d7cd011db47",
-		ClientID:     "962c0e07-48bc-4e30-b5fe-b95c11fe486c",
-		ClientSecret: "c5c8960e1119c4e0f944",
-	}
-	// secretEngine := engines.GetSecretEngine()
+	secretEngine := engines.GetSecretEngine()
 
 	initRoutes(secretEngine)
 
