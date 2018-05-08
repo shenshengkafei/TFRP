@@ -6,7 +6,7 @@ package consts
 
 const (
 	// StorageDatabase is the name of data base
-	StorageDatabase = "terraformrpwcus"
+	StorageDatabase = "terraformdocdbwcus"
 	// StoragePasswordKVBaseURI is the key vault base uri
 	StoragePasswordKVBaseURI = "https://terraformkeyvaultwcus.vault.azure.net/"
 	// StoragePasswordKVSecretName is the name of storage password secret
