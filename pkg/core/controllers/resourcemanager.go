@@ -246,11 +246,22 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 
 		state := new(terraform.InstanceState)
 		state.Init()
+
 		// Get Document from collection
 		resourcePackage := entities.ResourcePackage{}
 		err := resourceManager.ResourceDataProvider.FindPackage(fullyQualifiedResourceID, &resourcePackage)
 		if err == nil && resourcePackage.State != nil {
-			state = resourcePackage.State
+			// Call refresh
+			state, err = provider.Refresh(info, resourcePackage.State)
+			if err != nil {
+				apierror.WriteErrorToResponse(
+					response,
+					http.StatusBadRequest,
+					apierror.ClientError,
+					apierror.BadRequest,
+					err.Error())
+				return
+			}
 		}
 
 		diff, err := provider.Diff(info, state, terraform.NewResourceConfig(v.RawConfig))
