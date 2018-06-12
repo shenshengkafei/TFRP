@@ -522,5 +522,5 @@ func getConfigFileInJSON(providerType string, providerSpec []byte, resource enti
 }
 
 func getAsyncOperationURI(baseURI string, resourceID string) string {
-	return baseURI + resourceID
+	return "https://management.azure.com/" + resourceID
 }
