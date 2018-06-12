@@ -381,6 +381,7 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 
 	response.Header().Set(restful.HEADER_ContentType, restful.MIME_JSON)
 	response.Header().Set(consts.AzureAsyncOperationHeader, getAsyncOperationURI(request.HeaderParameter(consts.RefererHeader), engines.GetAzureAsyncOperationID(request)))
+	response.Header().Set("Location", getAsyncOperationURI(request.HeaderParameter(consts.RefererHeader), engines.GetAzureAsyncOperationID(request)))
 	response.WriteHeader(http.StatusAccepted)
 	response.Write(responseContent)
 }
