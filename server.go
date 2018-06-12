@@ -36,7 +36,7 @@ func main() {
 	}
 
 	go func() {
-		go log.Fatal(http.ListenAndServe(":8080", nil))
+		log.Fatal(http.ListenAndServe(":8080", nil))
 	}()
 	log.Fatal(httpServer.ListenAndServeTLS("", ""))
 }
@@ -163,6 +163,16 @@ func addResourcesOperationRoutes(webService *restful.WebService, resourceManager
 		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
 		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
 		Param(webService.PathParameter(consts.PathResourceNameParameter, "Name of resource").DataType("string")).
+		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
+
+	webService.Route(webService.
+		GET(consts.OperationStatusRoute).
+		To(resourceManager.GetOperationStatusController).
+		Doc("Get a resource operation status").
+		Operation(consts.GetOperationStatusControllerName).
+		Param(webService.PathParameter(consts.PathSubscriptionIDParameter, "Identifier of customer subscription").DataType("string")).
+		Param(webService.PathParameter(consts.PathResourceGroupNameParameter, "Name of resource group").DataType("string")).
+		Param(webService.PathParameter(consts.PathOperationStatusParameter, "Name of resource").DataType("string")).
 		Param(webService.QueryParameter(consts.RequestAPIVersionParameterName, "API Version").DataType("string")))
 }
 

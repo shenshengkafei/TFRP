@@ -9,6 +9,7 @@ const (
 	SubscriptionsLiteral         = "{sb:(?i)subscriptions}"
 	ResourceGroupsLiteral        = "{rg:(?i)resourcegroups}"
 	ResourcesLiteral             = "{rs:(?i)resources}"
+	OperationStatusLiteral       = "{os:(?i)operationstatus}"
 	ProvidersLiteral             = "{pv:(?i)providers}"
 	ProviderRegistrationsLiteral = "{pr:(?i)providerregistrations}"
 	ContainerServicesLiteral     = "{cs:(?i)containerservices}"
@@ -40,6 +41,8 @@ const (
 	PathResourceGroupNameParameter = "resourceGroupName"
 	// PathResourceNameParameter is the path parameter name used in routing for the resource name
 	PathResourceNameParameter = "resourceName"
+	// PathOperationStatusParameter is the path parameter name used in routing for the operation id
+	PathOperationStatusParameter = "operationId"
 	// PathProviderRegistrationParameter is the path parameter name used in routing for the provider registration
 	PathProviderRegistrationParameter = "providerRegistration"
 	// RequestAPIVersionParameterName is the query string parameter name ARM adds for the api version
@@ -81,6 +84,13 @@ const (
 		PathResourceGroupNameParameter +
 		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + ProviderRegistrationsLiteral + "/{" +
 		PathProviderRegistrationParameter + "}" + "/" + ListSettingsLiteral
+
+	// OperationStatusRoute is the route used to perform GET on an operation
+	// /{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.TerraformOSS/operationstatus/{opeartionId}
+	OperationStatusRoute = SubscriptionResourceOperationRoute + "/" + ResourceGroupsLiteral + "/{" +
+		PathResourceGroupNameParameter +
+		"}/" + ProvidersLiteral + "/" + TerraformRPNamespace + "/" + OperationStatusLiteral + "/{" +
+		PathOperationStatusParameter + "}"
 )
 
 const (
@@ -102,7 +112,57 @@ const (
 	PostProviderRegistrationListSettingsControllerName = "PostProviderRegistrationListSettingsController"
 
 	// GetSubscriptionControllerName is the constant logged for get subscription calls
-	GetSubscriptionControllerName
+	GetSubscriptionControllerName = "GetSubscriptionController"
 	// PutSubscriptionControllerName is the constant logged for put subscription calls
-	PutSubscriptionControllerName
+	PutSubscriptionControllerName = "PutSubscriptionControllerName"
+
+	// GetOperationStatusControllerName is the constant logged for get resource operation status calls
+	GetOperationStatusControllerName = "GetOperationStatus"
+)
+
+// Long running operation status constants
+const (
+	ProvisioningStateAccepted  = "Accepted"
+	ProvisioningStateDeleting  = "Deleting"
+	ProvisioningStateDeleted   = "Deleted"
+	ProvisioningStateFailed    = "Failed"
+	ProvisioningStateSucceeded = "Succeeded"
+)
+
+// Headers
+const (
+	// AcceptLanguageHeader is the standard http header name used so that we don't have to pass in the http request
+	AcceptLanguageHeader = "Accept-Language"
+	// HostHeader is the standard http header Host used to indicate the target host name
+	HostHeader = "Host"
+	// ContentTypeHeader is the standard http header Content-Type
+	ContentTypeHeader = "Content-Type"
+	// RequestResourceTypeParameterName is the query string parameter name to distiguish between cluster types
+	RequestResourceTypeParameterName = "resource-type"
+	// RequestCorrelationIDHeader is the http header name ARM adds for the correlationID
+	RequestCorrelationIDHeader = "x-ms-correlation-request-id"
+	// RequestClientRequestIDHeader is the http header name ARM adds for the client request id
+	RequestClientRequestIDHeader = "x-ms-client-request-id"
+	// RequestClientApplicationIDHeader is the http header name ARM adds for the client app id
+	RequestClientApplicationIDHeader = "x-ms-client-app-id"
+	// RequestClientPrincipalNameHeader is the http header name ARM adds for the client principal name
+	RequestClientPrincipalNameHeader = "x-ms-client-principal-name"
+	// ResponseRequestIDHeader is the http header name our rp adds to uniquely identify this request
+	ResponseRequestIDHeader = "x-ms-request-id"
+	// SkipTokenParameterName is the query string parameter name, optional
+	SkipTokenParameterName = "skipToken"
+	// RefererHeader is the refer
+	RefererHeader = "Referer"
+
+	// LocationHeader is the http header name required for Accepted status
+	LocationHeader = "Location"
+	// AzureAsyncOperationHeader is the http header name required for async operation
+	AzureAsyncOperationHeader = "Azure-AsyncOperation"
+	// RetryAfterHeader is the http header name for client's back off duration
+	RetryAfterHeader = "Retry-After"
+)
+
+const (
+	// OperationStatusAPIVersion is the operation status api version
+	OperationStatusAPIVersion = "2018-05-01-preview"
 )
