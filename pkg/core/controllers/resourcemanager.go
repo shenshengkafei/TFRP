@@ -203,7 +203,6 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 		providerRegistrationPackage.Settings,
 		resourceDefinition,
 		engines.GetResourceName(request), resourceSpec)
-	fmt.Printf("%s", configFile)
 
 	provider := engines.GetProvider(providerRegistrationPackage.ProviderType)
 
@@ -247,6 +246,7 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 		Type: resourceDefinition.Properties.ResourceType,
 	}
 
+	resourcePackage := entities.ResourcePackage{}
 	for _, v := range cfg.Resources {
 		_, errs := provider.ValidateResource(resourceDefinition.Properties.ResourceType, terraform.NewResourceConfig(v.RawConfig))
 		if errs != nil {
@@ -263,7 +263,6 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 		state.Init()
 
 		// Get Document from collection
-		resourcePackage := entities.ResourcePackage{}
 		err := resourceManager.ResourceDataProvider.FindPackage(fullyQualifiedResourceID, &resourcePackage)
 		if err == nil {
 			if strings.EqualFold(resourcePackage.ProvisioningState, consts.ProvisioningStateAccepted) {
@@ -319,13 +318,15 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 		}
 
 		// insert Document in collection
-		err = resourceManager.ResourceDataProvider.InsertPackage(&entities.ResourcePackage{
+		resourcePackage = entities.ResourcePackage{
+			Location:          resourceDefinition.Location,
 			ResourceID:        fullyQualifiedResourceID,
 			ProvisioningState: consts.ProvisioningStateAccepted,
 			Config:            configFile,
 			ResourceType:      resourceDefinition.Properties.ResourceType,
 			ProviderType:      providerRegistrationPackage.ProviderType,
-		})
+		}
+		err = resourceManager.ResourceDataProvider.InsertPackage(&resourcePackage)
 		if err != nil {
 			apierror.WriteErrorToResponse(
 				response,
@@ -341,6 +342,7 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 			resourceState, err := provider.Apply(info, state, diff)
 			if err != nil {
 				resourceManager.ResourceDataProvider.InsertPackage(&entities.ResourcePackage{
+					Location:                 resourceDefinition.Location,
 					ResourceID:               fullyQualifiedResourceID,
 					ProvisioningState:        consts.ProvisioningStateFailed,
 					ProvisioningErrorCode:    string(apierror.BadRequest),
@@ -354,6 +356,7 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 
 			// insert Document in collection
 			err = resourceManager.ResourceDataProvider.InsertPackage(&entities.ResourcePackage{
+				Location:          resourceDefinition.Location,
 				ResourceID:        fullyQualifiedResourceID,
 				StateID:           resourceState.ID,
 				State:             resourceState,
@@ -368,7 +371,7 @@ func (resourceManager *ResourceManager) PutResourceController(request *restful.R
 		}()
 	}
 
-	responseContent, err := json.Marshal(resourceDefinition)
+	responseContent, err := json.Marshal(resourcePackage.ToDefinition())
 	if err != nil {
 		apierror.WriteErrorToResponse(
 			response,

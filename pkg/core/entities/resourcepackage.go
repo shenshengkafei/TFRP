@@ -12,6 +12,7 @@ import (
 // ResourcePackage is the package stored in storag
 type ResourcePackage struct {
 	ID                       bson.ObjectId `bson:"_id,omitempty"`
+	Location                 string        `json:",omitempty"`
 	ResourceID               string        `json:",omitempty"`
 	StateID                  string        `json:",omitempty"`
 	State                    *terraform.InstanceState
@@ -25,19 +26,24 @@ type ResourcePackage struct {
 
 // ResourcePackageDefinition is the package definition
 type ResourcePackageDefinition struct {
+	Type       string
+	Location   string
 	Properties ResourcePackage
 }
 
 // ToDefinition returns the definition
 func (resourcePackage *ResourcePackage) ToDefinition() *ResourcePackageDefinition {
 	return &ResourcePackageDefinition{
+		Location: resourcePackage.Location,
+		Type:     resourcePackage.ResourceType,
 		Properties: ResourcePackage{
-			ID:           resourcePackage.ID,
-			ResourceID:   resourcePackage.ResourceID,
-			StateID:      resourcePackage.StateID,
-			State:        resourcePackage.State,
-			ResourceType: resourcePackage.ResourceType,
-			ProviderType: resourcePackage.ProviderType,
+			ID:                resourcePackage.ID,
+			ResourceID:        resourcePackage.ResourceID,
+			StateID:           resourcePackage.StateID,
+			State:             resourcePackage.State,
+			ProvisioningState: resourcePackage.ProvisioningState,
+			ResourceType:      resourcePackage.ResourceType,
+			ProviderType:      resourcePackage.ProviderType,
 		},
 	}
 }
