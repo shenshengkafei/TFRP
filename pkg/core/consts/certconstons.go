@@ -10,12 +10,12 @@ const (
 	// SslCertKVSecretName is the name of the secret
 	SslCertKVSecretName = "fullchain"
 	// SslCertKVSecretVersion is the version of the secret
-	SslCertKVSecretVersion = "04a70b24963b40708805e237d8f214a8"
+	SslCertKVSecretVersion = "06df72e85f3d430aa8825aefe6b58718"
 
 	// SslPrivatekeyKVBaseURI is the key vault base uri
 	SslPrivatekeyKVBaseURI = "https://terraformkeyvaultwcus.vault.azure.net/"
 	// SslPrivatekeyKVSecretName is the name of the secret
 	SslPrivatekeyKVSecretName = "privkey"
 	// SslPrivatekeyKVSecretVersion is the version of the secret
-	SslPrivatekeyKVSecretVersion = "88ee30742342407ea846e6df2f764df0"
+	SslPrivatekeyKVSecretVersion = "4d3f162baca940668ee4fb09e78c93ce"
 )
