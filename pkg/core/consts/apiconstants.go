@@ -49,6 +49,8 @@ const (
 	RequestAPIVersionParameterName = "api-version"
 	// TerraformRPNamespace is the ARM namespace for Terraform RP
 	TerraformRPNamespace = "Microsoft.TerraformOSS"
+	// TerraformResourceType is the resource type registerred in ARM manifest.
+	TerraformResourceType = "Microsoft.TerraformOSS/Resources"
 )
 
 // subscription and common routes.

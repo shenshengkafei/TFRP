@@ -5,6 +5,8 @@
 package entities
 
 import (
+	"TFRP/pkg/core/consts"
+
 	"github.com/hashicorp/terraform/terraform"
 	"gopkg.in/mgo.v2/bson"
 )
@@ -35,7 +37,7 @@ type ResourcePackageDefinition struct {
 func (resourcePackage *ResourcePackage) ToDefinition() *ResourcePackageDefinition {
 	return &ResourcePackageDefinition{
 		Location: resourcePackage.Location,
-		Type:     resourcePackage.ResourceType,
+		Type:     consts.TerraformResourceType,
 		Properties: ResourcePackage{
 			ID:                resourcePackage.ID,
 			ResourceID:        resourcePackage.ResourceID,
